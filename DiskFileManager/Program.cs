@@ -24,6 +24,14 @@ namespace DiskFileManager {
 				connection.Open();
 				CreateTables( connection );
 
+				string fp2 = args[1];
+				using ( SQLiteConnection c2 = new SQLiteConnection( "Data Source=" + fp2 ) ) {
+					c2.Open();
+					Transfer( c2, connection );
+				}
+
+				return;
+
 				List<Volume> volumes = new List<Volume>();
 				foreach ( ManagementObject vol in new ManagementClass( "Win32_Volume" ).GetInstances() ) {
 					string id = vol.Properties["DeviceID"].Value.ToString();
@@ -39,6 +47,35 @@ namespace DiskFileManager {
 			}
 
 			return;
+		}
+
+		private static void Transfer( SQLiteConnection sourceConn, SQLiteConnection targetConn ) {
+			using ( IDbTransaction st = sourceConn.BeginTransaction() )
+			using ( IDbTransaction tt = targetConn.BeginTransaction() ) {
+				{
+					var rv = HyoutaTools.SqliteUtil.SelectArray( st, "SELECT id, size, shorthash, hash FROM Files", new object[0] );
+					foreach ( var arr in rv ) {
+						HyoutaTools.SqliteUtil.Update( tt, "INSERT INTO Files (id, size, shorthash, hash) VALUES (?, ?, ?, ?)", arr );
+					}
+				}
+				{
+					var rv = HyoutaTools.SqliteUtil.SelectArray( st, "SELECT id, guid, label, shouldScan FROM Volumes", new object[0] );
+					foreach ( var arr in rv ) {
+						HyoutaTools.SqliteUtil.Update( tt, "INSERT INTO Volumes (id, guid, label, shouldScan) VALUES (?, ?, ?, ?)", arr );
+					}
+				}
+				{
+					var rv = HyoutaTools.SqliteUtil.SelectArray( st, "SELECT id, fileId, volumeId, path, name, timestamp, lastSeen FROM Storage", new object[0] );
+					foreach ( var arr in rv ) {
+						long pathId = InsertOrUpdatePath( tt, (long)arr[2], (string)arr[3] );
+						long filenameId = InsertOrUpdateFilename( tt, (string)arr[4] );
+						HyoutaTools.SqliteUtil.Update( tt, "INSERT INTO Storage (id, fileId, pathId, filenameId, timestamp, lastSeen) VALUES (?, ?, ?, ?, ?, ?)", new object[] { arr[0], arr[1], pathId, filenameId, arr[5], arr[6] } );
+					}
+				}
+
+				tt.Commit();
+				return;
+			}
 		}
 
 		private static void ProcessVolume( SQLiteConnection connection, Volume volume ) {
@@ -89,6 +126,34 @@ namespace DiskFileManager {
 			}
 		}
 
+		private static long InsertOrUpdateFilename( IDbTransaction t, string name ) {
+			var rv = HyoutaTools.SqliteUtil.SelectScalar( t, "SELECT id FROM Filenames WHERE name = ?", new object[] { name } );
+			if ( rv == null ) {
+				HyoutaTools.SqliteUtil.Update( t, "INSERT INTO Filenames ( name ) VALUES ( ? )", new object[] { name } );
+				rv = HyoutaTools.SqliteUtil.SelectScalar( t, "SELECT id FROM Filenames WHERE name = ?", new object[] { name } );
+			}
+			return (long)rv;
+		}
+
+		private static long InsertOrUpdatePathname( IDbTransaction t, string name ) {
+			var rv = HyoutaTools.SqliteUtil.SelectScalar( t, "SELECT id FROM Pathnames WHERE name = ?", new object[] { name } );
+			if ( rv == null ) {
+				HyoutaTools.SqliteUtil.Update( t, "INSERT INTO Pathnames ( name ) VALUES ( ? )", new object[] { name } );
+				rv = HyoutaTools.SqliteUtil.SelectScalar( t, "SELECT id FROM Pathnames WHERE name = ?", new object[] { name } );
+			}
+			return (long)rv;
+		}
+
+		private static long InsertOrUpdatePath( IDbTransaction t, long volumeId, string name ) {
+			long pathnameId = InsertOrUpdatePathname( t, name );
+			var rv = HyoutaTools.SqliteUtil.SelectScalar( t, "SELECT id FROM Paths WHERE volumeId = ? AND pathnameId = ?", new object[] { volumeId, pathnameId } );
+			if ( rv == null ) {
+				HyoutaTools.SqliteUtil.Update( t, "INSERT INTO Paths ( volumeId, pathnameId ) VALUES ( ?, ? )", new object[] { volumeId, pathnameId } );
+				rv = HyoutaTools.SqliteUtil.SelectScalar( t, "SELECT id FROM Paths WHERE volumeId = ? AND pathnameId = ?", new object[] { volumeId, pathnameId } );
+			}
+			return (long)rv;
+		}
+
 		private static void InsertOrUpdateFile( SQLiteConnection connection, Volume volume, string dirPath, string name, long filesize, byte[] hash, byte[] shorthash, DateTime lastWriteTimeUtc ) {
 			using ( IDbTransaction t = connection.BeginTransaction() ) {
 				var rv = HyoutaTools.SqliteUtil.SelectScalar( t, "SELECT id FROM Files WHERE size = ? AND hash = ? AND shorthash = ?", new object[] { filesize, hash, shorthash } );
@@ -98,12 +163,14 @@ namespace DiskFileManager {
 				}
 
 				long fileId = (long)rv;
+				long pathId = InsertOrUpdatePath( t, volume.ID, dirPath );
+				long filenameId = InsertOrUpdateFilename( t, name );
 
-				rv = HyoutaTools.SqliteUtil.SelectScalar( t, "SELECT id FROM Storage WHERE volumeId = ? AND path = ? AND name = ?", new object[] { volume.ID, dirPath, name } );
+				rv = HyoutaTools.SqliteUtil.SelectScalar( t, "SELECT id FROM Storage WHERE pathId = ? AND filenameId = ?", new object[] { pathId, filenameId } );
 				long timestamp = (long)HyoutaTools.Util.DateTimeToUnixTime( lastWriteTimeUtc );
 				long lastSeen = (long)HyoutaTools.Util.DateTimeToUnixTime( DateTime.UtcNow );
 				if ( rv == null ) {
-					HyoutaTools.SqliteUtil.Update( t, "INSERT INTO Storage ( fileId, volumeId, path, name, timestamp, lastSeen ) VALUES ( ?, ?, ?, ?, ?, ? )", new object[] { fileId, volume.ID, dirPath, name, timestamp, lastSeen } );
+					HyoutaTools.SqliteUtil.Update( t, "INSERT INTO Storage ( fileId, pathId, filenameId, timestamp, lastSeen ) VALUES ( ?, ?, ?, ?, ? )", new object[] { fileId, pathId, filenameId, timestamp, lastSeen } );
 				} else {
 					long storageId = (long)rv;
 					HyoutaTools.SqliteUtil.Update( t, "UPDATE Storage SET fileId = ?, timestamp = ?, lastSeen = ? WHERE id = ?", new object[] { fileId, timestamp, lastSeen, storageId } );
@@ -115,7 +182,12 @@ namespace DiskFileManager {
 
 		private static bool CheckAndUpdateFile( SQLiteConnection connection, Volume volume, FileInfo file, string dirPath, byte[] expectedShorthash ) {
 			using ( IDbTransaction t = connection.BeginTransaction() ) {
-				var rv = HyoutaTools.SqliteUtil.SelectArray( t, "SELECT Storage.id, Files.size, Storage.timestamp, Files.shorthash FROM Storage INNER JOIN Files ON Storage.fileId = Files.id WHERE Storage.volumeId = ? AND Storage.path = ? AND Storage.name = ?", new object[] { volume.ID, dirPath, file.Name } );
+				var rv = HyoutaTools.SqliteUtil.SelectArray( t, "SELECT Storage.id, Files.size, Storage.timestamp, Files.shorthash FROM Storage " +
+					"INNER JOIN Files ON Storage.fileId = Files.id " +
+					"INNER JOIN Paths ON Storage.pathId = Paths.id " +
+					"INNER JOIN Pathnames ON Paths.pathnameId = Pathnames.id " +
+					"INNER JOIN Filenames ON Storage.filenameId = Filenames.id " +
+					"WHERE Paths.volumeId = ? AND Pathnames.name = ? AND Filenames.name = ?", new object[] { volume.ID, dirPath, file.Name } );
 				if ( rv == null || rv.Count == 0 ) {
 					return false;
 				}
@@ -145,7 +217,7 @@ namespace DiskFileManager {
 			using ( IDbTransaction t = connection.BeginTransaction() ) {
 				List<object[]> rv = HyoutaTools.SqliteUtil.SelectArray( t, "SELECT id, shouldScan FROM Volumes WHERE guid = ?", new object[] { id } );
 				if ( rv == null || rv.Count == 0 ) {
-					HyoutaTools.SqliteUtil.Update( t, "INSERT INTO Volumes ( guid, label, shouldScan ) VALUES ( ?, ?, ? )", new object[] { id, label, label.Contains( "ortable" ) } );
+					HyoutaTools.SqliteUtil.Update( t, "INSERT INTO Volumes ( guid, label, shouldScan ) VALUES ( ?, ?, ? )", new object[] { id, label, true } );
 					rv = HyoutaTools.SqliteUtil.SelectArray( t, "SELECT id, shouldScan FROM Volumes WHERE guid = ?", new object[] { id } );
 					t.Commit();
 				}
@@ -162,26 +234,42 @@ namespace DiskFileManager {
 					"hash BLOB NOT NULL, " +
 					"UNIQUE(size, shorthash, hash)" +
 				")" );
-				//HyoutaTools.SqliteUtil.Update( t, "CREATE INDEX IF NOT EXISTS FileIndex ON Files (size, hash)" );
 				HyoutaTools.SqliteUtil.Update( t, "CREATE TABLE IF NOT EXISTS Volumes (" +
 					"id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
 					"guid TEXT NOT NULL, " +
 					"label TEXT NOT NULL, " +
 					"shouldScan BOOLEAN NOT NULL" +
 				")" );
+				HyoutaTools.SqliteUtil.Update( t, "CREATE TABLE IF NOT EXISTS Pathnames (" +
+					"id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+					"name TEXT NOT NULL, " + // directory path, unix separator, no drive letter; no filename
+					"UNIQUE(name)" +
+				")" );
+				HyoutaTools.SqliteUtil.Update( t, "CREATE TABLE IF NOT EXISTS Filenames (" +
+					"id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+					"name TEXT NOT NULL, " + // filename
+					"UNIQUE(name)" +
+				")" );
+				HyoutaTools.SqliteUtil.Update( t, "CREATE TABLE IF NOT EXISTS Paths (" +
+					"id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+					"volumeId INTEGER NOT NULL, " +
+					"pathnameId INTEGER NOT NULL, " +
+					"FOREIGN KEY(volumeId) REFERENCES Volumes(id), " +
+					"FOREIGN KEY(pathnameId) REFERENCES Pathnames(id), " +
+					"UNIQUE(volumeId, pathnameId)" +
+				")" );
 				HyoutaTools.SqliteUtil.Update( t, "CREATE TABLE IF NOT EXISTS Storage (" +
 					"id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
 					"fileId INTEGER NOT NULL, " +
-					"volumeId INTEGER NOT NULL, " +
-					"path TEXT NOT NULL, " + // directory path, unix separator, no drive letter; no filename
-					"name TEXT NOT NULL, " + // filename
+					"pathId INTEGER NOT NULL, " +
+					"filenameId INTEGER NOT NULL, " +
 					"timestamp INTEGER NOT NULL, " + // actual on-disk last modified timestamp
 					"lastSeen INTEGER NOT NULL, " + // when we have last seen it
 					"FOREIGN KEY(fileId) REFERENCES Files(id), " +
-					"FOREIGN KEY(volumeId) REFERENCES Volumes(id), " +
-					"UNIQUE(volumeId, path, name)" +
+					"FOREIGN KEY(pathId) REFERENCES Paths(id), " +
+					"FOREIGN KEY(filenameId) REFERENCES Filenames(id), " +
+					"UNIQUE(pathId, filenameId)" +
 				")" );
-				HyoutaTools.SqliteUtil.Update( t, "CREATE INDEX IF NOT EXISTS FilePath ON Storage (path)" );
 				t.Commit();
 			}
 		}
