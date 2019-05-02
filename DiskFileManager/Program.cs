@@ -24,14 +24,6 @@ namespace DiskFileManager {
 				connection.Open();
 				CreateTables( connection );
 
-				string fp2 = args[1];
-				using ( SQLiteConnection c2 = new SQLiteConnection( "Data Source=" + fp2 ) ) {
-					c2.Open();
-					Transfer( c2, connection );
-				}
-
-				return;
-
 				List<Volume> volumes = new List<Volume>();
 				foreach ( ManagementObject vol in new ManagementClass( "Win32_Volume" ).GetInstances() ) {
 					string id = vol.Properties["DeviceID"].Value.ToString();
@@ -47,35 +39,6 @@ namespace DiskFileManager {
 			}
 
 			return;
-		}
-
-		private static void Transfer( SQLiteConnection sourceConn, SQLiteConnection targetConn ) {
-			using ( IDbTransaction st = sourceConn.BeginTransaction() )
-			using ( IDbTransaction tt = targetConn.BeginTransaction() ) {
-				{
-					var rv = HyoutaTools.SqliteUtil.SelectArray( st, "SELECT id, size, shorthash, hash FROM Files", new object[0] );
-					foreach ( var arr in rv ) {
-						HyoutaTools.SqliteUtil.Update( tt, "INSERT INTO Files (id, size, shorthash, hash) VALUES (?, ?, ?, ?)", arr );
-					}
-				}
-				{
-					var rv = HyoutaTools.SqliteUtil.SelectArray( st, "SELECT id, guid, label, shouldScan FROM Volumes", new object[0] );
-					foreach ( var arr in rv ) {
-						HyoutaTools.SqliteUtil.Update( tt, "INSERT INTO Volumes (id, guid, label, shouldScan) VALUES (?, ?, ?, ?)", arr );
-					}
-				}
-				{
-					var rv = HyoutaTools.SqliteUtil.SelectArray( st, "SELECT id, fileId, volumeId, path, name, timestamp, lastSeen FROM Storage", new object[0] );
-					foreach ( var arr in rv ) {
-						long pathId = InsertOrUpdatePath( tt, (long)arr[2], (string)arr[3] );
-						long filenameId = InsertOrUpdateFilename( tt, (string)arr[4] );
-						HyoutaTools.SqliteUtil.Update( tt, "INSERT INTO Storage (id, fileId, pathId, filenameId, timestamp, lastSeen) VALUES (?, ?, ?, ?, ?, ?)", new object[] { arr[0], arr[1], pathId, filenameId, arr[5], arr[6] } );
-					}
-				}
-
-				tt.Commit();
-				return;
-			}
 		}
 
 		private static void ProcessVolume( SQLiteConnection connection, Volume volume ) {
