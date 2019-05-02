@@ -17,12 +17,31 @@ namespace DiskFileManager {
 		public bool ShouldScan;
 	}
 
+	class StorageFile {
+		public long FileId;
+		public long Size;
+		public byte[] ShortHash;
+		public byte[] Hash;
+		public long StorageId;
+		public string Path;
+		public string Filename;
+		public long VolumeId;
+		public DateTime Timestamp;
+		public DateTime LastSeen;
+	}
+
 	class Program {
 		static void Main( string[] args ) {
 			string databaseFilePath = args[0];
 			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + databaseFilePath ) ) {
 				connection.Open();
 				CreateTables( connection );
+
+				long? volIdCheck = null;
+				if ( volIdCheck != null ) {
+					PrintFileInformation( connection, GetKnownFilesOnVolume( connection, volIdCheck.Value ) );
+					return;
+				}
 
 				List<Volume> volumes = new List<Volume>();
 				foreach ( ManagementObject vol in new ManagementClass( "Win32_Volume" ).GetInstances() ) {
@@ -39,6 +58,87 @@ namespace DiskFileManager {
 			}
 
 			return;
+		}
+
+		private static void PrintFileInformation( SQLiteConnection connection, List<StorageFile> files ) {
+			foreach ( var file in files ) {
+				var sameFiles = GetStorageFilesForFileId( connection, file.FileId );
+				Console.WriteLine( "File #{0}", file.FileId );
+				Console.WriteLine( "{0:N0} bytes", file.Size );
+				Console.WriteLine( "Exists in {0} places:", sameFiles.Count );
+				foreach ( var sf in sameFiles ) {
+					Console.WriteLine( "  Volume #{0}, {1}/{2}", sf.VolumeId, sf.Path, sf.Filename );
+				}
+				Console.WriteLine();
+			}
+		}
+
+		private static List<StorageFile> GetStorageFilesForFileId( SQLiteConnection connection, long fileId ) {
+			var rv = HyoutaTools.SqliteUtil.SelectArray( connection,
+				"SELECT Files.size, Files.shorthash, Files.hash, Storage.id AS storageId, Pathnames.name AS pathname, " +
+				"Paths.volumeId, Filenames.name AS filename, Storage.timestamp, Storage.lastSeen " +
+				"FROM Files " +
+				"INNER JOIN Storage ON Files.id = Storage.fileId " +
+				"INNER JOIN Paths ON Storage.pathId = Paths.id " +
+				"INNER JOIN Pathnames ON Paths.pathnameId = Pathnames.id " +
+				"INNER JOIN Filenames ON Storage.filenameId = Filenames.id " +
+				"WHERE Files.id = ?", new object[] { fileId } );
+
+			if ( rv == null || rv.Count == 0 ) {
+				return new List<StorageFile>();
+			}
+
+			List<StorageFile> files = new List<StorageFile>( rv.Count );
+			foreach ( var arr in rv ) {
+				files.Add( new StorageFile() {
+					FileId = fileId,
+					Size = (long)arr[0],
+					ShortHash = (byte[])arr[1],
+					Hash = (byte[])arr[2],
+					StorageId = (long)arr[3],
+					Path = (string)arr[4],
+					VolumeId = (long)arr[5],
+					Filename = (string)arr[6],
+					Timestamp = HyoutaTools.Util.UnixTimeToDateTime( (ulong)( (long)arr[7] ) ),
+					LastSeen = HyoutaTools.Util.UnixTimeToDateTime( (ulong)( (long)arr[8] ) ),
+				} );
+			}
+
+			return files;
+		}
+
+		private static List<StorageFile> GetKnownFilesOnVolume( SQLiteConnection connection, long volumeId ) {
+			var rv = HyoutaTools.SqliteUtil.SelectArray( connection,
+				"SELECT Files.id, Files.size, Files.shorthash, Files.hash, Storage.id AS storageId, " +
+				"Pathnames.name AS pathname, Filenames.name AS filename, Storage.timestamp, Storage.lastSeen " +
+				"FROM Storage " +
+				"INNER JOIN Files ON Storage.fileId = Files.id " +
+				"INNER JOIN Paths ON Storage.pathId = Paths.id " +
+				"INNER JOIN Pathnames ON Paths.pathnameId = Pathnames.id " +
+				"INNER JOIN Filenames ON Storage.filenameId = Filenames.id " +
+				"WHERE Paths.volumeId = ?", new object[] { volumeId } );
+
+			if ( rv == null || rv.Count == 0 ) {
+				return new List<StorageFile>();
+			}
+
+			List<StorageFile> files = new List<StorageFile>( rv.Count );
+			foreach ( var arr in rv ) {
+				files.Add( new StorageFile() {
+					FileId = (long)arr[0],
+					Size = (long)arr[1],
+					ShortHash = (byte[])arr[2],
+					Hash = (byte[])arr[3],
+					StorageId = (long)arr[4],
+					Path = (string)arr[5],
+					Filename = (string)arr[6],
+					VolumeId = volumeId,
+					Timestamp = HyoutaTools.Util.UnixTimeToDateTime( (ulong)( (long)arr[7] ) ),
+					LastSeen = HyoutaTools.Util.UnixTimeToDateTime( (ulong)( (long)arr[8] ) ),
+				} );
+			}
+
+			return files;
 		}
 
 		private static void ProcessVolume( SQLiteConnection connection, Volume volume ) {
@@ -233,6 +333,7 @@ namespace DiskFileManager {
 					"FOREIGN KEY(filenameId) REFERENCES Filenames(id), " +
 					"UNIQUE(pathId, filenameId)" +
 				")" );
+				HyoutaTools.SqliteUtil.Update( t, "CREATE INDEX IF NOT EXISTS StorageFileId ON Storage (fileId)" );
 				t.Commit();
 			}
 		}
