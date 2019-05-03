@@ -141,21 +141,41 @@ namespace DiskFileManager {
 			return files;
 		}
 
-		private static void ProcessVolume( SQLiteConnection connection, Volume volume ) {
+		private static List<StorageFile> ProcessVolume( SQLiteConnection connection, Volume volume ) {
 			if ( !volume.ShouldScan ) {
-				return;
+				return null;
 			}
 
-			ProcessDirectory( connection, volume, new DirectoryInfo( volume.DeviceID ), "" );
+			List<StorageFile> files = new List<StorageFile>();
+			ProcessDirectory( connection, files, volume, new DirectoryInfo( volume.DeviceID ), "" );
+			DiscardUnseenStorageFiles( connection, files, volume );
+			return files;
 		}
 
-		private static void ProcessDirectory( SQLiteConnection connection, Volume volume, DirectoryInfo directory, string path ) {
+		private static void DiscardUnseenStorageFiles( SQLiteConnection connection, List<StorageFile> files, Volume volume ) {
+			var knownFiles = GetKnownFilesOnVolume( connection, volume.ID );
+			ISet<long> seenStorageIds = new HashSet<long>();
+			foreach ( var f in files ) {
+				seenStorageIds.Add( f.StorageId );
+			}
+			using ( IDbTransaction t = connection.BeginTransaction() ) {
+				foreach ( var f in knownFiles ) {
+					if ( !seenStorageIds.Contains( f.StorageId ) ) {
+						Console.WriteLine( "[" + volume.Label + "] Discarding unseen file {0}/{1}", f.Path, f.Filename );
+						HyoutaTools.SqliteUtil.Update( t, "DELETE FROM Storage WHERE id = ?", new object[] { f.StorageId } );
+					}
+				}
+				t.Commit();
+			}
+		}
+
+		private static void ProcessDirectory( SQLiteConnection connection, List<StorageFile> files, Volume volume, DirectoryInfo directory, string path ) {
 			try {
 				foreach ( var fsi in directory.GetFileSystemInfos() ) {
 					if ( fsi is FileInfo ) {
-						ProcessFile( connection, volume, fsi as FileInfo, path );
+						ProcessFile( connection, files, volume, fsi as FileInfo, path );
 					} else if ( fsi is DirectoryInfo ) {
-						ProcessDirectory( connection, volume, fsi as DirectoryInfo, path + "/" + fsi.Name );
+						ProcessDirectory( connection, files, volume, fsi as DirectoryInfo, path + "/" + fsi.Name );
 					}
 				}
 			} catch ( UnauthorizedAccessException ex ) {
@@ -163,15 +183,17 @@ namespace DiskFileManager {
 			}
 		}
 
-		private static void ProcessFile( SQLiteConnection connection, Volume volume, FileInfo file, string dirPath ) {
+		private static void ProcessFile( SQLiteConnection connection, List<StorageFile> files, Volume volume, FileInfo file, string dirPath ) {
 			try {
 				Console.Write( "[" + volume.Label + "] Checking file: " + dirPath + "/" + file.Name + ", " + string.Format( "{0:n0}", file.Length ) + " bytes..." );
 				byte[] shorthash;
 				using ( var fs = new FileStream( file.FullName, FileMode.Open, FileAccess.Read ) ) {
 					shorthash = HashUtil.CalculateShortHash( fs );
 				}
-				if ( CheckAndUpdateFile( connection, volume, file, dirPath, shorthash ) ) {
+				StorageFile sf = CheckAndUpdateFile( connection, volume, file, dirPath, shorthash );
+				if ( sf != null ) {
 					Console.WriteLine( " seems same." );
+					files.Add( sf );
 					return;
 				}
 				Console.WriteLine( " is different or new." );
@@ -183,7 +205,7 @@ namespace DiskFileManager {
 					shorthash = HashUtil.CalculateShortHash( fs );
 					hash = HashUtil.CalculateHash( fs );
 				}
-				InsertOrUpdateFile( connection, volume, dirPath, file.Name, filesize, hash, shorthash, file.LastWriteTimeUtc );
+				files.Add( InsertOrUpdateFile( connection, volume, dirPath, file.Name, filesize, hash, shorthash, file.LastWriteTimeUtc ) );
 			} catch ( UnauthorizedAccessException ex ) {
 				Console.WriteLine( ex.ToString() );
 			}
@@ -217,7 +239,7 @@ namespace DiskFileManager {
 			return (long)rv;
 		}
 
-		private static void InsertOrUpdateFile( SQLiteConnection connection, Volume volume, string dirPath, string name, long filesize, byte[] hash, byte[] shorthash, DateTime lastWriteTimeUtc ) {
+		private static StorageFile InsertOrUpdateFile( SQLiteConnection connection, Volume volume, string dirPath, string name, long filesize, byte[] hash, byte[] shorthash, DateTime lastWriteTimeUtc ) {
 			using ( IDbTransaction t = connection.BeginTransaction() ) {
 				var rv = HyoutaTools.SqliteUtil.SelectScalar( t, "SELECT id FROM Files WHERE size = ? AND hash = ? AND shorthash = ?", new object[] { filesize, hash, shorthash } );
 				if ( rv == null ) {
@@ -232,39 +254,56 @@ namespace DiskFileManager {
 				rv = HyoutaTools.SqliteUtil.SelectScalar( t, "SELECT id FROM Storage WHERE pathId = ? AND filenameId = ?", new object[] { pathId, filenameId } );
 				long timestamp = (long)HyoutaTools.Util.DateTimeToUnixTime( lastWriteTimeUtc );
 				long lastSeen = (long)HyoutaTools.Util.DateTimeToUnixTime( DateTime.UtcNow );
+				long storageId;
 				if ( rv == null ) {
 					HyoutaTools.SqliteUtil.Update( t, "INSERT INTO Storage ( fileId, pathId, filenameId, timestamp, lastSeen ) VALUES ( ?, ?, ?, ?, ? )", new object[] { fileId, pathId, filenameId, timestamp, lastSeen } );
+					rv = HyoutaTools.SqliteUtil.SelectScalar( t, "SELECT id FROM Storage WHERE pathId = ? AND filenameId = ?", new object[] { pathId, filenameId } );
+					storageId = (long)rv;
 				} else {
-					long storageId = (long)rv;
+					storageId = (long)rv;
 					HyoutaTools.SqliteUtil.Update( t, "UPDATE Storage SET fileId = ?, timestamp = ?, lastSeen = ? WHERE id = ?", new object[] { fileId, timestamp, lastSeen, storageId } );
 				}
 
 				t.Commit();
+
+				return new StorageFile() {
+					FileId = fileId,
+					Size = filesize,
+					Hash = hash,
+					ShortHash = shorthash,
+					StorageId = storageId,
+					Path = dirPath,
+					Filename = name,
+					VolumeId = volume.ID,
+					Timestamp = HyoutaTools.Util.UnixTimeToDateTime( (ulong)timestamp ),
+					LastSeen = HyoutaTools.Util.UnixTimeToDateTime( (ulong)lastSeen ),
+				};
 			}
 		}
 
-		private static bool CheckAndUpdateFile( SQLiteConnection connection, Volume volume, FileInfo file, string dirPath, byte[] expectedShorthash ) {
+		private static StorageFile CheckAndUpdateFile( SQLiteConnection connection, Volume volume, FileInfo file, string dirPath, byte[] expectedShorthash ) {
 			using ( IDbTransaction t = connection.BeginTransaction() ) {
-				var rv = HyoutaTools.SqliteUtil.SelectArray( t, "SELECT Storage.id, Files.size, Storage.timestamp, Files.shorthash FROM Storage " +
+				var rv = HyoutaTools.SqliteUtil.SelectArray( t, "SELECT Storage.id, Files.size, Storage.timestamp, Files.shorthash, Storage.fileId FROM Storage " +
 					"INNER JOIN Files ON Storage.fileId = Files.id " +
 					"INNER JOIN Paths ON Storage.pathId = Paths.id " +
 					"INNER JOIN Pathnames ON Paths.pathnameId = Pathnames.id " +
 					"INNER JOIN Filenames ON Storage.filenameId = Filenames.id " +
 					"WHERE Paths.volumeId = ? AND Pathnames.name = ? AND Filenames.name = ?", new object[] { volume.ID, dirPath, file.Name } );
 				if ( rv == null || rv.Count == 0 ) {
-					return false;
+					return null;
 				}
 
 				long storageId = (long)rv[0][0];
 				long fileSize = (long)rv[0][1];
 				long timestamp = (long)rv[0][2];
 				byte[] shorthash = (byte[])rv[0][3];
+				long fileId = (long)rv[0][4];
 
 				long expectedFilesize = file.Length;
 				long expectedTimestamp = (long)HyoutaTools.Util.DateTimeToUnixTime( file.LastWriteTimeUtc );
 
 				if ( fileSize != expectedFilesize || timestamp != expectedTimestamp || !expectedShorthash.SequenceEqual( shorthash ) ) {
-					return false;
+					return null;
 				}
 
 				// seems to check out
@@ -272,7 +311,17 @@ namespace DiskFileManager {
 				HyoutaTools.SqliteUtil.Update( t, "UPDATE Storage SET lastSeen = ? WHERE id = ?", new object[] { updateTimestamp, storageId } );
 				t.Commit();
 
-				return true;
+				return new StorageFile() {
+					FileId = fileId,
+					Size = fileSize,
+					ShortHash = shorthash,
+					StorageId = storageId,
+					VolumeId = volume.ID,
+					Path = dirPath,
+					Filename = file.Name,
+					Timestamp = HyoutaTools.Util.UnixTimeToDateTime( (ulong)timestamp ),
+					LastSeen = HyoutaTools.Util.UnixTimeToDateTime( (ulong)updateTimestamp ),
+				};
 			}
 		}
 
