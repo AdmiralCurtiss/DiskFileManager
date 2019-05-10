@@ -10,26 +10,6 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace DiskFileManager {
-	class Volume {
-		public long ID;
-		public string DeviceID;
-		public string Label;
-		public bool ShouldScan;
-	}
-
-	class StorageFile {
-		public long FileId;
-		public long Size;
-		public byte[] ShortHash;
-		public byte[] Hash;
-		public long StorageId;
-		public string Path;
-		public string Filename;
-		public long VolumeId;
-		public DateTime Timestamp;
-		public DateTime LastSeen;
-	}
-
 	class Program {
 		static void Main( string[] args ) {
 			string databaseFilePath = args[0];
