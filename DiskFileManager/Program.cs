@@ -1,4 +1,5 @@
-﻿using System;
+﻿using CommandLine;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SQLite;
@@ -10,20 +11,45 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace DiskFileManager {
+	public class BaseOptions {
+		[Option( "database", Default = null, Required = false, HelpText = "Custom path to database." )]
+		public string DatabasePath {
+			get {
+				return _DatabasePath ?? Path.Combine( Environment.GetFolderPath( Environment.SpecialFolder.MyDocuments ), "diskfilemanagerdb.sqlite" );
+			}
+			set {
+				_DatabasePath = value;
+			}
+		}
+
+		private string _DatabasePath;
+	}
+
+	[Verb( "scan" )]
+	public class ScanOptions : BaseOptions {
+	}
+
+	[Verb( "list" )]
+	public class ListOptions : BaseOptions {
+		[Option( 'v', "volume", Default = null, Required = false, HelpText = "Volume ID to list files of." )]
+		public int? Volume { get; set; }
+	}
+
 	class Program {
-		static void Main( string[] args ) {
-			string databaseFilePath = args[0];
-			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + databaseFilePath ) ) {
+		static int Main( string[] args ) {
+			return Parser.Default.ParseArguments<ScanOptions, ListOptions>( args ).MapResult(
+				( ScanOptions a ) => Scan( a ),
+				( ListOptions a ) => List( a ),
+				errs => -1
+			);
+		}
+
+		private static int Scan( ScanOptions args ) {
+			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + args.DatabasePath ) ) {
 				connection.Open();
 				using ( IDbTransaction t = connection.BeginTransaction() ) {
 					DatabaseHelper.CreateTables( t );
 					t.Commit();
-				}
-
-				long? volIdCheck = null;
-				if ( volIdCheck != null ) {
-					PrintFileInformation( connection, GetKnownFilesOnVolume( connection, volIdCheck.Value ) );
-					return;
 				}
 
 				List<Volume> volumes = new List<Volume>();
@@ -40,7 +66,29 @@ namespace DiskFileManager {
 				connection.Close();
 			}
 
-			return;
+			return 0;
+		}
+
+		private static int List( ListOptions args ) {
+			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + args.DatabasePath ) ) {
+				connection.Open();
+
+				if ( args.Volume != null ) {
+					PrintFileInformation( connection, GetKnownFilesOnVolume( connection, args.Volume.Value ) );
+				} else {
+					PrintVolumeInformation( GetKnownVolumes( connection ) );
+				}
+
+				connection.Close();
+			}
+
+			return 0;
+		}
+
+		private static void PrintVolumeInformation( List<Volume> volumes ) {
+			foreach ( var volume in volumes ) {
+				Console.WriteLine( "Volume #{0}: {1}", volume.ID, volume.Label );
+			}
 		}
 
 		private static void PrintFileInformation( SQLiteConnection connection, List<StorageFile> files ) {
@@ -54,6 +102,25 @@ namespace DiskFileManager {
 				}
 				Console.WriteLine();
 			}
+		}
+
+		private static List<Volume> GetKnownVolumes( SQLiteConnection connection ) {
+			List<Volume> volumes = new List<Volume>();
+			using ( IDbTransaction t = connection.BeginTransaction() ) {
+				List<object[]> rv = HyoutaTools.SqliteUtil.SelectArray( t, "SELECT id, guid, label, shouldScan FROM Volumes ORDER BY id ASC", new object[0] );
+				if ( rv != null ) {
+					foreach ( object[] r in rv ) {
+						volumes.Add( new Volume() {
+							ID = (long)r[0],
+							DeviceID = (string)r[1],
+							Label = (string)r[2],
+							ShouldScan = (bool)r[3],
+						} );
+					}
+				}
+
+			}
+			return volumes;
 		}
 
 		private static List<StorageFile> GetStorageFilesForFileId( SQLiteConnection connection, long fileId ) {
