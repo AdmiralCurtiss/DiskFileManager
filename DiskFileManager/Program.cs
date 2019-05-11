@@ -104,7 +104,7 @@ namespace DiskFileManager {
 		private static int Search( SearchOptions args ) {
 			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + args.DatabasePath ) ) {
 				connection.Open();
-				PrintFileInformation( connection, GetFilesWithFilename( connection, args.File ) );
+				PrintFileInformation( connection, GetFilesWithFilename( connection, "%" + args.File + "%" ) );
 				connection.Close();
 			}
 
