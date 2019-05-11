@@ -35,11 +35,18 @@ namespace DiskFileManager {
 		public int? Volume { get; set; }
 	}
 
+	[Verb( "search" )]
+	public class SearchOptions : BaseOptions {
+		[Option( 'f', "filename", Default = null, Required = true, HelpText = "Search pattern for filename." )]
+		public string File { get; set; }
+	}
+
 	class Program {
 		static int Main( string[] args ) {
-			return Parser.Default.ParseArguments<ScanOptions, ListOptions>( args ).MapResult(
+			return Parser.Default.ParseArguments<ScanOptions, ListOptions, SearchOptions>( args ).MapResult(
 				( ScanOptions a ) => Scan( a ),
 				( ListOptions a ) => List( a ),
+				( SearchOptions a ) => Search( a ),
 				errs => -1
 			);
 		}
@@ -79,6 +86,16 @@ namespace DiskFileManager {
 					PrintVolumeInformation( GetKnownVolumes( connection ) );
 				}
 
+				connection.Close();
+			}
+
+			return 0;
+		}
+
+		private static int Search( SearchOptions args ) {
+			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + args.DatabasePath ) ) {
+				connection.Open();
+				PrintFileInformation( connection, GetFilesWithFilename( connection, args.File ) );
 				connection.Close();
 			}
 
@@ -185,6 +202,40 @@ namespace DiskFileManager {
 					VolumeId = volumeId,
 					Timestamp = HyoutaTools.Util.UnixTimeToDateTime( (ulong)( (long)arr[7] ) ),
 					LastSeen = HyoutaTools.Util.UnixTimeToDateTime( (ulong)( (long)arr[8] ) ),
+				} );
+			}
+
+			return files;
+		}
+
+		private static List<StorageFile> GetFilesWithFilename( SQLiteConnection connection, string filename ) {
+			var rv = HyoutaTools.SqliteUtil.SelectArray( connection,
+				"SELECT Files.id, Files.size, Files.shorthash, Files.hash, Storage.id AS storageId, Paths.volumeId, " +
+				"Pathnames.name AS pathname, Filenames.name AS filename, Storage.timestamp, Storage.lastSeen " +
+				"FROM Storage " +
+				"INNER JOIN Files ON Storage.fileId = Files.id " +
+				"INNER JOIN Paths ON Storage.pathId = Paths.id " +
+				"INNER JOIN Pathnames ON Paths.pathnameId = Pathnames.id " +
+				"INNER JOIN Filenames ON Storage.filenameId = Filenames.id " +
+				"WHERE Filenames.name LIKE ?", new object[] { filename } );
+
+			if ( rv == null || rv.Count == 0 ) {
+				return new List<StorageFile>();
+			}
+
+			List<StorageFile> files = new List<StorageFile>( rv.Count );
+			foreach ( var arr in rv ) {
+				files.Add( new StorageFile() {
+					FileId = (long)arr[0],
+					Size = (long)arr[1],
+					ShortHash = (byte[])arr[2],
+					Hash = (byte[])arr[3],
+					StorageId = (long)arr[4],
+					VolumeId = (long)arr[5],
+					Path = (string)arr[6],
+					Filename = (string)arr[7],
+					Timestamp = HyoutaTools.Util.UnixTimeToDateTime( (ulong)( (long)arr[8] ) ),
+					LastSeen = HyoutaTools.Util.UnixTimeToDateTime( (ulong)( (long)arr[9] ) ),
 				} );
 			}
 
