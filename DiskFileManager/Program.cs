@@ -142,7 +142,13 @@ namespace DiskFileManager {
 		}
 
 		private static void PrintFileInformation( TextWriter stdout, SQLiteConnection connection, List<StorageFile> files, long? onlyOnVolume = null, long? minInstances = null, long? maxInstances = null ) {
+			ISet<long> seenIds = new HashSet<long>();
 			foreach ( var file in files ) {
+				if ( seenIds.Contains( file.FileId ) ) {
+					continue;
+				}
+
+				seenIds.Add( file.FileId );
 				var sameFiles = GetStorageFilesForFileId( connection, file.FileId, onlyOnVolume );
 				bool minLimit = minInstances == null || sameFiles.Count >= minInstances.Value;
 				bool maxLimit = maxInstances == null || sameFiles.Count <= maxInstances.Value;
