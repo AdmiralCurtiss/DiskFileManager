@@ -33,6 +33,15 @@ namespace DiskFileManager {
 	public class ListOptions : BaseOptions {
 		[Option( 'v', "volume", Default = null, Required = false, HelpText = "Volume ID to list files of." )]
 		public int? Volume { get; set; }
+
+		[Option( "selected-volume-only", Default = false, Required = false, HelpText = "Only list files on the given volume." )]
+		public bool SelectedVolumeOnly { get; set; }
+
+		[Option( "min-instance-count", Default = null, Required = false, HelpText = "Minimum file instance count." )]
+		public int? MinInstanceCount { get; set; }
+
+		[Option( "max-instance-count", Default = null, Required = false, HelpText = "Maximum file instance count." )]
+		public int? MaxInstanceCount { get; set; }
 	}
 
 	[Verb( "search" )]
@@ -81,7 +90,7 @@ namespace DiskFileManager {
 				connection.Open();
 
 				if ( args.Volume != null ) {
-					PrintFileInformation( connection, GetKnownFilesOnVolume( connection, args.Volume.Value ) );
+					PrintFileInformation( connection, GetKnownFilesOnVolume( connection, args.Volume.Value ), args.SelectedVolumeOnly ? args.Volume : null, args.MinInstanceCount, args.MaxInstanceCount );
 				} else {
 					PrintVolumeInformation( GetKnownVolumes( connection ) );
 				}
@@ -108,16 +117,20 @@ namespace DiskFileManager {
 			}
 		}
 
-		private static void PrintFileInformation( SQLiteConnection connection, List<StorageFile> files ) {
+		private static void PrintFileInformation( SQLiteConnection connection, List<StorageFile> files, long? onlyOnVolume = null, long? minInstances = null, long? maxInstances = null ) {
 			foreach ( var file in files ) {
-				var sameFiles = GetStorageFilesForFileId( connection, file.FileId );
-				Console.WriteLine( "File #{0}", file.FileId );
-				Console.WriteLine( "{0:N0} bytes", file.Size );
-				Console.WriteLine( "Exists in {0} places:", sameFiles.Count );
-				foreach ( var sf in sameFiles ) {
-					Console.WriteLine( "  Volume #{0}, {1}/{2}", sf.VolumeId, sf.Path, sf.Filename );
+				var sameFiles = GetStorageFilesForFileId( connection, file.FileId, onlyOnVolume );
+				bool minLimit = minInstances == null || sameFiles.Count >= minInstances.Value;
+				bool maxLimit = maxInstances == null || sameFiles.Count <= maxInstances.Value;
+				if ( minLimit && maxLimit ) {
+					Console.WriteLine( "File #{0}", file.FileId );
+					Console.WriteLine( "{0:N0} bytes", file.Size );
+					Console.WriteLine( "Exists in {0} places:", sameFiles.Count );
+					foreach ( var sf in sameFiles ) {
+						Console.WriteLine( "  Volume #{0}, {1}/{2}", sf.VolumeId, sf.Path, sf.Filename );
+					}
+					Console.WriteLine();
 				}
-				Console.WriteLine();
 			}
 		}
 
@@ -140,7 +153,7 @@ namespace DiskFileManager {
 			return volumes;
 		}
 
-		private static List<StorageFile> GetStorageFilesForFileId( SQLiteConnection connection, long fileId ) {
+		private static List<StorageFile> GetStorageFilesForFileId( SQLiteConnection connection, long fileId, long? onlyOnVolume = null ) {
 			var rv = HyoutaTools.SqliteUtil.SelectArray( connection,
 				"SELECT Files.size, Files.shorthash, Files.hash, Storage.id AS storageId, Pathnames.name AS pathname, " +
 				"Paths.volumeId, Filenames.name AS filename, Storage.timestamp, Storage.lastSeen " +
@@ -149,7 +162,9 @@ namespace DiskFileManager {
 				"INNER JOIN Paths ON Storage.pathId = Paths.id " +
 				"INNER JOIN Pathnames ON Paths.pathnameId = Pathnames.id " +
 				"INNER JOIN Filenames ON Storage.filenameId = Filenames.id " +
-				"WHERE Files.id = ?", new object[] { fileId } );
+				"WHERE Files.id = ?" + ( onlyOnVolume != null ? " AND Paths.volumeId = ?" : "" ),
+				onlyOnVolume != null ? new object[] { fileId, onlyOnVolume.Value } : new object[] { fileId }
+			);
 
 			if ( rv == null || rv.Count == 0 ) {
 				return new List<StorageFile>();
