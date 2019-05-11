@@ -23,6 +23,9 @@ namespace DiskFileManager {
 		}
 
 		private string _DatabasePath;
+
+		[Option( "log", Default = null, Required = false, HelpText = "Path to log file. Prints to stdout if not set." )]
+		public string LogPath { get; set; }
 	}
 
 	[Verb( "scan" )]
@@ -50,6 +53,24 @@ namespace DiskFileManager {
 		public string File { get; set; }
 	}
 
+	class TextWriterWrapper : IDisposable {
+		public TextWriter Writer { get; private set; }
+
+		public TextWriterWrapper( string outpath ) {
+			Writer = outpath != null ? new StreamWriter( outpath ) : Console.Out;
+		}
+
+		protected virtual void Dispose( bool disposing ) {
+			if ( disposing && Writer != Console.Out ) {
+				Writer.Dispose();
+			}
+		}
+
+		public void Dispose() {
+			Dispose( true );
+		}
+	}
+
 	class Program {
 		static int Main( string[] args ) {
 			return Parser.Default.ParseArguments<ScanOptions, ListOptions, SearchOptions>( args ).MapResult(
@@ -61,6 +82,7 @@ namespace DiskFileManager {
 		}
 
 		private static int Scan( ScanOptions args ) {
+			using ( TextWriterWrapper textWriterWrapper = new TextWriterWrapper( args.LogPath ) )
 			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + args.DatabasePath ) ) {
 				connection.Open();
 				using ( IDbTransaction t = connection.BeginTransaction() ) {
@@ -76,7 +98,7 @@ namespace DiskFileManager {
 				}
 
 				foreach ( Volume v in volumes ) {
-					ProcessVolume( connection, v );
+					ProcessVolume( textWriterWrapper.Writer, connection, v );
 				}
 
 				connection.Close();
@@ -86,13 +108,14 @@ namespace DiskFileManager {
 		}
 
 		private static int List( ListOptions args ) {
+			using ( TextWriterWrapper textWriterWrapper = new TextWriterWrapper( args.LogPath ) )
 			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + args.DatabasePath ) ) {
 				connection.Open();
 
 				if ( args.Volume != null ) {
-					PrintFileInformation( connection, GetKnownFilesOnVolume( connection, args.Volume.Value ), args.SelectedVolumeOnly ? args.Volume : null, args.MinInstanceCount, args.MaxInstanceCount );
+					PrintFileInformation( textWriterWrapper.Writer, connection, GetKnownFilesOnVolume( connection, args.Volume.Value ), args.SelectedVolumeOnly ? args.Volume : null, args.MinInstanceCount, args.MaxInstanceCount );
 				} else {
-					PrintVolumeInformation( GetKnownVolumes( connection ) );
+					PrintVolumeInformation( textWriterWrapper.Writer, GetKnownVolumes( connection ) );
 				}
 
 				connection.Close();
@@ -102,34 +125,35 @@ namespace DiskFileManager {
 		}
 
 		private static int Search( SearchOptions args ) {
+			using ( TextWriterWrapper textWriterWrapper = new TextWriterWrapper( args.LogPath ) )
 			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + args.DatabasePath ) ) {
 				connection.Open();
-				PrintFileInformation( connection, GetFilesWithFilename( connection, "%" + args.File + "%" ) );
+				PrintFileInformation( textWriterWrapper.Writer, connection, GetFilesWithFilename( connection, "%" + args.File + "%" ) );
 				connection.Close();
 			}
 
 			return 0;
 		}
 
-		private static void PrintVolumeInformation( List<Volume> volumes ) {
+		private static void PrintVolumeInformation( TextWriter stdout, List<Volume> volumes ) {
 			foreach ( var volume in volumes ) {
-				Console.WriteLine( "Volume #{0}: {1}", volume.ID, volume.Label );
+				stdout.WriteLine( "Volume #{0}: {1}", volume.ID, volume.Label );
 			}
 		}
 
-		private static void PrintFileInformation( SQLiteConnection connection, List<StorageFile> files, long? onlyOnVolume = null, long? minInstances = null, long? maxInstances = null ) {
+		private static void PrintFileInformation( TextWriter stdout, SQLiteConnection connection, List<StorageFile> files, long? onlyOnVolume = null, long? minInstances = null, long? maxInstances = null ) {
 			foreach ( var file in files ) {
 				var sameFiles = GetStorageFilesForFileId( connection, file.FileId, onlyOnVolume );
 				bool minLimit = minInstances == null || sameFiles.Count >= minInstances.Value;
 				bool maxLimit = maxInstances == null || sameFiles.Count <= maxInstances.Value;
 				if ( minLimit && maxLimit ) {
-					Console.WriteLine( "File #{0}", file.FileId );
-					Console.WriteLine( "{0:N0} bytes", file.Size );
-					Console.WriteLine( "Exists in {0} places:", sameFiles.Count );
+					stdout.WriteLine( "File #{0}", file.FileId );
+					stdout.WriteLine( "{0:N0} bytes", file.Size );
+					stdout.WriteLine( "Exists in {0} places:", sameFiles.Count );
 					foreach ( var sf in sameFiles ) {
-						Console.WriteLine( "  Volume #{0}, {1}/{2}", sf.VolumeId, sf.Path, sf.Filename );
+						stdout.WriteLine( "  Volume #{0}, {1}/{2}", sf.VolumeId, sf.Path, sf.Filename );
 					}
-					Console.WriteLine();
+					stdout.WriteLine();
 				}
 			}
 		}
@@ -257,18 +281,18 @@ namespace DiskFileManager {
 			return files;
 		}
 
-		private static List<StorageFile> ProcessVolume( SQLiteConnection connection, Volume volume ) {
+		private static List<StorageFile> ProcessVolume( TextWriter stdout, SQLiteConnection connection, Volume volume ) {
 			if ( !volume.ShouldScan ) {
 				return null;
 			}
 
 			List<StorageFile> files = new List<StorageFile>();
-			ProcessDirectory( connection, files, volume, new DirectoryInfo( volume.DeviceID ), "" );
-			DiscardUnseenStorageFiles( connection, files, volume );
+			ProcessDirectory( stdout, connection, files, volume, new DirectoryInfo( volume.DeviceID ), "" );
+			DiscardUnseenStorageFiles( stdout, connection, files, volume );
 			return files;
 		}
 
-		private static void DiscardUnseenStorageFiles( SQLiteConnection connection, List<StorageFile> files, Volume volume ) {
+		private static void DiscardUnseenStorageFiles( TextWriter stdout, SQLiteConnection connection, List<StorageFile> files, Volume volume ) {
 			var knownFiles = GetKnownFilesOnVolume( connection, volume.ID );
 			ISet<long> seenStorageIds = new HashSet<long>();
 			foreach ( var f in files ) {
@@ -277,7 +301,7 @@ namespace DiskFileManager {
 			using ( IDbTransaction t = connection.BeginTransaction() ) {
 				foreach ( var f in knownFiles ) {
 					if ( !seenStorageIds.Contains( f.StorageId ) ) {
-						Console.WriteLine( "[" + volume.Label + "] Discarding unseen file {0}/{1}", f.Path, f.Filename );
+						stdout.WriteLine( "[" + volume.Label + "] Discarding unseen file {0}/{1}", f.Path, f.Filename );
 						HyoutaTools.SqliteUtil.Update( t, "DELETE FROM Storage WHERE id = ?", new object[] { f.StorageId } );
 					}
 				}
@@ -285,34 +309,34 @@ namespace DiskFileManager {
 			}
 		}
 
-		private static void ProcessDirectory( SQLiteConnection connection, List<StorageFile> files, Volume volume, DirectoryInfo directory, string path ) {
+		private static void ProcessDirectory( TextWriter stdout, SQLiteConnection connection, List<StorageFile> files, Volume volume, DirectoryInfo directory, string path ) {
 			try {
 				foreach ( var fsi in directory.GetFileSystemInfos() ) {
 					if ( fsi is FileInfo ) {
-						ProcessFile( connection, files, volume, fsi as FileInfo, path );
+						ProcessFile( stdout, connection, files, volume, fsi as FileInfo, path );
 					} else if ( fsi is DirectoryInfo ) {
-						ProcessDirectory( connection, files, volume, fsi as DirectoryInfo, path + "/" + fsi.Name );
+						ProcessDirectory( stdout, connection, files, volume, fsi as DirectoryInfo, path + "/" + fsi.Name );
 					}
 				}
 			} catch ( UnauthorizedAccessException ex ) {
-				Console.WriteLine( ex.ToString() );
+				stdout.WriteLine( ex.ToString() );
 			}
 		}
 
-		private static void ProcessFile( SQLiteConnection connection, List<StorageFile> files, Volume volume, FileInfo file, string dirPath ) {
+		private static void ProcessFile( TextWriter stdout, SQLiteConnection connection, List<StorageFile> files, Volume volume, FileInfo file, string dirPath ) {
 			try {
-				Console.Write( "[" + volume.Label + "] Checking file: " + dirPath + "/" + file.Name + ", " + string.Format( "{0:n0}", file.Length ) + " bytes..." );
+				stdout.Write( "[" + volume.Label + "] Checking file: " + dirPath + "/" + file.Name + ", " + string.Format( "{0:n0}", file.Length ) + " bytes..." );
 				byte[] shorthash;
 				using ( var fs = new FileStream( file.FullName, FileMode.Open, FileAccess.Read ) ) {
 					shorthash = HashUtil.CalculateShortHash( fs );
 				}
 				StorageFile sf = CheckAndUpdateFile( connection, volume, file, dirPath, shorthash );
 				if ( sf != null ) {
-					Console.WriteLine( " seems same." );
+					stdout.WriteLine( " seems same." );
 					files.Add( sf );
 					return;
 				}
-				Console.WriteLine( " is different or new." );
+				stdout.WriteLine( " is different or new." );
 
 				long filesize;
 				byte[] hash;
@@ -323,7 +347,7 @@ namespace DiskFileManager {
 				}
 				files.Add( InsertOrUpdateFile( connection, volume, dirPath, file.Name, filesize, hash, shorthash, file.LastWriteTimeUtc ) );
 			} catch ( UnauthorizedAccessException ex ) {
-				Console.WriteLine( ex.ToString() );
+				stdout.WriteLine( ex.ToString() );
 			}
 		}
 
