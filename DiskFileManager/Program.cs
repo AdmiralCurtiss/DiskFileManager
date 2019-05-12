@@ -211,8 +211,8 @@ namespace DiskFileManager {
 					Path = (string)arr[4],
 					VolumeId = (long)arr[5],
 					Filename = (string)arr[6],
-					Timestamp = HyoutaTools.Util.UnixTimeToDateTime( (ulong)( (long)arr[7] ) ),
-					LastSeen = HyoutaTools.Util.UnixTimeToDateTime( (ulong)( (long)arr[8] ) ),
+					Timestamp = HyoutaTools.Util.UnixTimeToDateTime( (long)arr[7] ),
+					LastSeen = HyoutaTools.Util.UnixTimeToDateTime( (long)arr[8] ),
 				} );
 			}
 
@@ -245,8 +245,8 @@ namespace DiskFileManager {
 					Path = (string)arr[5],
 					Filename = (string)arr[6],
 					VolumeId = volumeId,
-					Timestamp = HyoutaTools.Util.UnixTimeToDateTime( (ulong)( (long)arr[7] ) ),
-					LastSeen = HyoutaTools.Util.UnixTimeToDateTime( (ulong)( (long)arr[8] ) ),
+					Timestamp = HyoutaTools.Util.UnixTimeToDateTime( (long)arr[7] ),
+					LastSeen = HyoutaTools.Util.UnixTimeToDateTime( (long)arr[8] ),
 				} );
 			}
 
@@ -279,8 +279,8 @@ namespace DiskFileManager {
 					VolumeId = (long)arr[5],
 					Path = (string)arr[6],
 					Filename = (string)arr[7],
-					Timestamp = HyoutaTools.Util.UnixTimeToDateTime( (ulong)( (long)arr[8] ) ),
-					LastSeen = HyoutaTools.Util.UnixTimeToDateTime( (ulong)( (long)arr[9] ) ),
+					Timestamp = HyoutaTools.Util.UnixTimeToDateTime( (long)arr[8] ),
+					LastSeen = HyoutaTools.Util.UnixTimeToDateTime( (long)arr[9] ),
 				} );
 			}
 
@@ -370,8 +370,8 @@ namespace DiskFileManager {
 				long filenameId = DatabaseHelper.InsertOrUpdateFilename( t, name );
 
 				rv = HyoutaTools.SqliteUtil.SelectScalar( t, "SELECT id FROM Storage WHERE pathId = ? AND filenameId = ?", new object[] { pathId, filenameId } );
-				long timestamp = (long)HyoutaTools.Util.DateTimeToUnixTime( lastWriteTimeUtc );
-				long lastSeen = (long)HyoutaTools.Util.DateTimeToUnixTime( DateTime.UtcNow );
+				long timestamp = HyoutaTools.Util.DateTimeToUnixTime( lastWriteTimeUtc );
+				long lastSeen = HyoutaTools.Util.DateTimeToUnixTime( DateTime.UtcNow );
 				long storageId;
 				if ( rv == null ) {
 					HyoutaTools.SqliteUtil.Update( t, "INSERT INTO Storage ( fileId, pathId, filenameId, timestamp, lastSeen ) VALUES ( ?, ?, ?, ?, ? )", new object[] { fileId, pathId, filenameId, timestamp, lastSeen } );
@@ -393,8 +393,8 @@ namespace DiskFileManager {
 					Path = dirPath,
 					Filename = name,
 					VolumeId = volume.ID,
-					Timestamp = HyoutaTools.Util.UnixTimeToDateTime( (ulong)timestamp ),
-					LastSeen = HyoutaTools.Util.UnixTimeToDateTime( (ulong)lastSeen ),
+					Timestamp = HyoutaTools.Util.UnixTimeToDateTime( timestamp ),
+					LastSeen = HyoutaTools.Util.UnixTimeToDateTime( lastSeen ),
 				};
 			}
 		}
@@ -418,14 +418,14 @@ namespace DiskFileManager {
 				long fileId = (long)rv[0][4];
 
 				long expectedFilesize = file.Length;
-				long expectedTimestamp = (long)HyoutaTools.Util.DateTimeToUnixTime( file.LastWriteTimeUtc );
+				long expectedTimestamp = HyoutaTools.Util.DateTimeToUnixTime( file.LastWriteTimeUtc );
 
 				if ( fileSize != expectedFilesize || timestamp != expectedTimestamp || !expectedShorthash.SequenceEqual( shorthash ) ) {
 					return null;
 				}
 
 				// seems to check out
-				long updateTimestamp = (long)HyoutaTools.Util.DateTimeToUnixTime( DateTime.UtcNow );
+				long updateTimestamp = HyoutaTools.Util.DateTimeToUnixTime( DateTime.UtcNow );
 				HyoutaTools.SqliteUtil.Update( t, "UPDATE Storage SET lastSeen = ? WHERE id = ?", new object[] { updateTimestamp, storageId } );
 				t.Commit();
 
@@ -437,8 +437,8 @@ namespace DiskFileManager {
 					VolumeId = volume.ID,
 					Path = dirPath,
 					Filename = file.Name,
-					Timestamp = HyoutaTools.Util.UnixTimeToDateTime( (ulong)timestamp ),
-					LastSeen = HyoutaTools.Util.UnixTimeToDateTime( (ulong)updateTimestamp ),
+					Timestamp = HyoutaTools.Util.UnixTimeToDateTime( timestamp ),
+					LastSeen = HyoutaTools.Util.UnixTimeToDateTime( updateTimestamp ),
 				};
 			}
 		}
