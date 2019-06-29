@@ -53,6 +53,19 @@ namespace DiskFileManager {
 		public string File { get; set; }
 	}
 
+	[Verb( "multi" )]
+	public class QuickfindMultipleOptions : BaseOptions {
+		[Option( 'v', "volume", Required = true, HelpText = "Volume ID to find files of." )]
+		public int Volume { get; set; }
+	}
+
+	[Verb( "exclusive" )]
+	public class QuickfindExclusiveOptions : BaseOptions {
+		[Option( 'v', "volume", Required = true, HelpText = "Volume ID to find files of." )]
+		public int Volume { get; set; }
+	}
+
+
 	class TextWriterWrapper : IDisposable {
 		public TextWriter Writer { get; private set; }
 
@@ -73,12 +86,28 @@ namespace DiskFileManager {
 
 	class Program {
 		static int Main( string[] args ) {
-			return Parser.Default.ParseArguments<ScanOptions, ListOptions, SearchOptions>( args ).MapResult(
+			return Parser.Default.ParseArguments<ScanOptions, ListOptions, SearchOptions, QuickfindMultipleOptions, QuickfindExclusiveOptions>( args ).MapResult(
 				( ScanOptions a ) => Scan( a ),
 				( ListOptions a ) => List( a ),
 				( SearchOptions a ) => Search( a ),
+				( QuickfindMultipleOptions a ) => QuickfindMultipleCopiesOnSameVolume( a ),
+				( QuickfindExclusiveOptions a ) => QuickfindFilesExclusiveToVolume( a ),
 				errs => -1
 			);
+		}
+
+		private static int QuickfindMultipleCopiesOnSameVolume( QuickfindMultipleOptions a ) {
+			ListOptions l = new ListOptions();
+			l.DatabasePath = a.DatabasePath;
+			l.LogPath = a.LogPath;
+			l.MinInstanceCount = 2;
+			l.SelectedVolumeOnly = true;
+			l.Volume = a.Volume;
+			return List( l );
+		}
+
+		private static int QuickfindFilesExclusiveToVolume( QuickfindExclusiveOptions a ) {
+			return List( a.LogPath, a.DatabasePath, a.Volume, false, ( x ) => x.All( (s) => s.VolumeId == x[0].VolumeId ) );
 		}
 
 		private static int Scan( ScanOptions args ) {
@@ -108,17 +137,25 @@ namespace DiskFileManager {
 		}
 
 		private static int List( ListOptions args ) {
-			using ( TextWriterWrapper textWriterWrapper = new TextWriterWrapper( args.LogPath ) )
-			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + args.DatabasePath ) ) {
+			return List( args.LogPath, args.DatabasePath, args.Volume, args.SelectedVolumeOnly, ( x ) => {
+				bool minLimit = args.MinInstanceCount == null || x.Count >= args.MinInstanceCount.Value;
+				bool maxLimit = args.MaxInstanceCount == null || x.Count <= args.MaxInstanceCount.Value;
+				return minLimit && maxLimit;
+			} );
+		}
+
+		private static int List( string logPath, string databasePath, int? volume, bool selectedVolumeOnly, ShouldPrint shouldPrint ) {
+			using ( TextWriterWrapper textWriterWrapper = new TextWriterWrapper( logPath ) )
+			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + databasePath ) ) {
 				connection.Open();
 
-				if ( args.Volume != null ) {
+				if ( volume != null ) {
 					long? v = null;
-					if ( args.Volume.Value != 0 ) {
-						v = args.Volume.Value;
+					if ( volume.Value != 0 ) {
+						v = volume.Value;
 					}
 					List<StorageFile> files = GetKnownFilesOnVolume( connection, v );
-					PrintFileInformation( textWriterWrapper.Writer, connection, files, args.SelectedVolumeOnly ? args.Volume : null, args.MinInstanceCount, args.MaxInstanceCount );
+					PrintFileInformation( textWriterWrapper.Writer, connection, files, shouldPrint, selectedVolumeOnly ? volume : null );
 				} else {
 					PrintVolumeInformation( textWriterWrapper.Writer, GetKnownVolumes( connection ) );
 				}
@@ -133,7 +170,7 @@ namespace DiskFileManager {
 			using ( TextWriterWrapper textWriterWrapper = new TextWriterWrapper( args.LogPath ) )
 			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + args.DatabasePath ) ) {
 				connection.Open();
-				PrintFileInformation( textWriterWrapper.Writer, connection, GetFilesWithFilename( connection, "%" + args.File + "%" ) );
+				PrintFileInformation( textWriterWrapper.Writer, connection, GetFilesWithFilename( connection, "%" + args.File + "%" ), (x) => true );
 				connection.Close();
 			}
 
@@ -146,7 +183,8 @@ namespace DiskFileManager {
 			}
 		}
 
-		private static void PrintFileInformation( TextWriter stdout, SQLiteConnection connection, List<StorageFile> files, long? onlyOnVolume = null, long? minInstances = null, long? maxInstances = null ) {
+		private delegate bool ShouldPrint( List<StorageFile> files );
+		private static void PrintFileInformation( TextWriter stdout, SQLiteConnection connection, List<StorageFile> files, ShouldPrint shouldPrint, long? onlyOnVolume = null ) {
 			ISet<long> seenIds = new HashSet<long>();
 			foreach ( var file in files ) {
 				if ( seenIds.Contains( file.FileId ) ) {
@@ -155,9 +193,7 @@ namespace DiskFileManager {
 
 				seenIds.Add( file.FileId );
 				var sameFiles = GetStorageFilesForFileId( connection, file.FileId, onlyOnVolume );
-				bool minLimit = minInstances == null || sameFiles.Count >= minInstances.Value;
-				bool maxLimit = maxInstances == null || sameFiles.Count <= maxInstances.Value;
-				if ( minLimit && maxLimit ) {
+				if ( shouldPrint( sameFiles ) ) {
 					stdout.WriteLine( "File #{0}", file.FileId );
 					stdout.WriteLine( "{0:N0} bytes", file.Size );
 					stdout.WriteLine( "Exists in {0} places:", sameFiles.Count );
