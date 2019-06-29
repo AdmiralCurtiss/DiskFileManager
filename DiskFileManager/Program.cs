@@ -34,7 +34,7 @@ namespace DiskFileManager {
 
 	[Verb( "list" )]
 	public class ListOptions : BaseOptions {
-		[Option( 'v', "volume", Default = null, Required = false, HelpText = "Volume ID to list files of." )]
+		[Option( 'v', "volume", Default = null, Required = false, HelpText = "Volume ID to list files of. 0 to list all volumes." )]
 		public int? Volume { get; set; }
 
 		[Option( "selected-volume-only", Default = false, Required = false, HelpText = "Only list files on the given volume." )]
@@ -113,7 +113,12 @@ namespace DiskFileManager {
 				connection.Open();
 
 				if ( args.Volume != null ) {
-					PrintFileInformation( textWriterWrapper.Writer, connection, GetKnownFilesOnVolume( connection, args.Volume.Value ), args.SelectedVolumeOnly ? args.Volume : null, args.MinInstanceCount, args.MaxInstanceCount );
+					long? v = null;
+					if ( args.Volume.Value != 0 ) {
+						v = args.Volume.Value;
+					}
+					List<StorageFile> files = GetKnownFilesOnVolume( connection, v );
+					PrintFileInformation( textWriterWrapper.Writer, connection, files, args.SelectedVolumeOnly ? args.Volume : null, args.MinInstanceCount, args.MaxInstanceCount );
 				} else {
 					PrintVolumeInformation( textWriterWrapper.Writer, GetKnownVolumes( connection ) );
 				}
@@ -219,16 +224,21 @@ namespace DiskFileManager {
 			return files;
 		}
 
-		private static List<StorageFile> GetKnownFilesOnVolume( SQLiteConnection connection, long volumeId ) {
-			var rv = HyoutaTools.SqliteUtil.SelectArray( connection,
-				"SELECT Files.id, Files.size, Files.shorthash, Files.hash, Storage.id AS storageId, " +
-				"Pathnames.name AS pathname, Filenames.name AS filename, Storage.timestamp, Storage.lastSeen " +
+		private static List<StorageFile> GetKnownFilesOnVolume( SQLiteConnection connection, long? volumeId ) {
+			string statement = "SELECT Files.id, Files.size, Files.shorthash, Files.hash, Storage.id AS storageId, " +
+				"Pathnames.name AS pathname, Filenames.name AS filename, Storage.timestamp, Storage.lastSeen, Paths.volumeId AS volumeId " +
 				"FROM Storage " +
 				"INNER JOIN Files ON Storage.fileId = Files.id " +
 				"INNER JOIN Paths ON Storage.pathId = Paths.id " +
 				"INNER JOIN Pathnames ON Paths.pathnameId = Pathnames.id " +
-				"INNER JOIN Filenames ON Storage.filenameId = Filenames.id " +
-				"WHERE Paths.volumeId = ?", new object[] { volumeId } );
+				"INNER JOIN Filenames ON Storage.filenameId = Filenames.id";
+
+			List<object[]> rv;
+			if ( volumeId.HasValue ) {
+				rv = HyoutaTools.SqliteUtil.SelectArray( connection, statement + " WHERE Paths.volumeId = ?", new object[] { volumeId.Value } );
+			} else {
+				rv = HyoutaTools.SqliteUtil.SelectArray( connection, statement, new object[0] );
+			}
 
 			if ( rv == null || rv.Count == 0 ) {
 				return new List<StorageFile>();
@@ -244,7 +254,7 @@ namespace DiskFileManager {
 					StorageId = (long)arr[4],
 					Path = (string)arr[5],
 					Filename = (string)arr[6],
-					VolumeId = volumeId,
+					VolumeId = (long)arr[9],
 					Timestamp = HyoutaTools.Util.UnixTimeToDateTime( (long)arr[7] ),
 					LastSeen = HyoutaTools.Util.UnixTimeToDateTime( (long)arr[8] ),
 				} );
