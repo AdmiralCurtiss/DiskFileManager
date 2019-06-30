@@ -97,13 +97,7 @@ namespace DiskFileManager {
 		}
 
 		private static int QuickfindMultipleCopiesOnSameVolume( QuickfindMultipleOptions a ) {
-			ListOptions l = new ListOptions();
-			l.DatabasePath = a.DatabasePath;
-			l.LogPath = a.LogPath;
-			l.MinInstanceCount = 2;
-			l.SelectedVolumeOnly = true;
-			l.Volume = a.Volume;
-			return List( l );
+			return ListFiles( a.LogPath, a.DatabasePath, a.Volume, true, ( x ) => x.Count >= 2 );
 		}
 
 		private static int QuickfindFilesExclusiveToVolume( QuickfindExclusiveOptions a ) {
