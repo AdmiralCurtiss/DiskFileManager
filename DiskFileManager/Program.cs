@@ -132,7 +132,11 @@ namespace DiskFileManager {
 
 		private static int List( ListOptions args ) {
 			if ( args.Volume.HasValue ) {
-				return ListFiles( args.LogPath, args.DatabasePath, args.Volume.Value, args.SelectedVolumeOnly, ( x ) => {
+				int? volume = null;
+				if ( args.Volume.Value != 0 ) {
+					volume = args.Volume.Value;
+				}
+				return ListFiles( args.LogPath, args.DatabasePath, volume, args.SelectedVolumeOnly, ( x ) => {
 					bool minLimit = args.MinInstanceCount == null || x.Count >= args.MinInstanceCount.Value;
 					bool maxLimit = args.MaxInstanceCount == null || x.Count <= args.MaxInstanceCount.Value;
 					return minLimit && maxLimit;
@@ -153,17 +157,13 @@ namespace DiskFileManager {
 			return 0;
 		}
 
-		private static int ListFiles( string logPath, string databasePath, int volume, bool selectedVolumeOnly, ShouldPrint shouldPrint ) {
+		private static int ListFiles( string logPath, string databasePath, int? volume, bool selectedVolumeOnly, ShouldPrint shouldPrint ) {
 			using ( TextWriterWrapper textWriterWrapper = new TextWriterWrapper( logPath ) )
 			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + databasePath ) ) {
 				connection.Open();
 
-				long? v = null;
-				if ( volume != 0 ) {
-					v = volume;
-				}
-				List<StorageFile> files = GetKnownFilesOnVolume( connection, v );
-				foreach ( var sameFiles in CollectFiles( connection, files, shouldPrint, selectedVolumeOnly ? v : null ) ) {
+				List<StorageFile> files = GetKnownFilesOnVolume( connection, volume );
+				foreach ( var sameFiles in CollectFiles( connection, files, shouldPrint, selectedVolumeOnly ? volume : null ) ) {
 					PrintSameFileInformation( textWriterWrapper.Writer, sameFiles );
 				}
 
