@@ -107,7 +107,7 @@ namespace DiskFileManager {
 		}
 
 		private static int QuickfindFilesExclusiveToVolume( QuickfindExclusiveOptions a ) {
-			return List( a.LogPath, a.DatabasePath, a.Volume, false, ( x ) => x.All( (s) => s.VolumeId == x[0].VolumeId ) );
+			return ListFiles( a.LogPath, a.DatabasePath, a.Volume, false, ( x ) => x.All( (s) => s.VolumeId == x[0].VolumeId ) );
 		}
 
 		private static int Scan( ScanOptions args ) {
@@ -137,29 +137,40 @@ namespace DiskFileManager {
 		}
 
 		private static int List( ListOptions args ) {
-			return List( args.LogPath, args.DatabasePath, args.Volume, args.SelectedVolumeOnly, ( x ) => {
-				bool minLimit = args.MinInstanceCount == null || x.Count >= args.MinInstanceCount.Value;
-				bool maxLimit = args.MaxInstanceCount == null || x.Count <= args.MaxInstanceCount.Value;
-				return minLimit && maxLimit;
-			} );
+			if ( args.Volume.HasValue ) {
+				return ListFiles( args.LogPath, args.DatabasePath, args.Volume.Value, args.SelectedVolumeOnly, ( x ) => {
+					bool minLimit = args.MinInstanceCount == null || x.Count >= args.MinInstanceCount.Value;
+					bool maxLimit = args.MaxInstanceCount == null || x.Count <= args.MaxInstanceCount.Value;
+					return minLimit && maxLimit;
+				} );
+			} else {
+				return ListVolumes( args.LogPath, args.DatabasePath );
+			}
 		}
 
-		private static int List( string logPath, string databasePath, int? volume, bool selectedVolumeOnly, ShouldPrint shouldPrint ) {
+		private static int ListVolumes( string logPath, string databasePath ) {
+			using ( TextWriterWrapper textWriterWrapper = new TextWriterWrapper( logPath ) )
+			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + databasePath ) ) {
+				connection.Open();
+				PrintVolumeInformation( textWriterWrapper.Writer, GetKnownVolumes( connection ) );
+				connection.Close();
+			}
+
+			return 0;
+		}
+
+		private static int ListFiles( string logPath, string databasePath, int volume, bool selectedVolumeOnly, ShouldPrint shouldPrint ) {
 			using ( TextWriterWrapper textWriterWrapper = new TextWriterWrapper( logPath ) )
 			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + databasePath ) ) {
 				connection.Open();
 
-				if ( volume != null ) {
-					long? v = null;
-					if ( volume.Value != 0 ) {
-						v = volume.Value;
-					}
-					List<StorageFile> files = GetKnownFilesOnVolume( connection, v );
-					foreach ( var sameFiles in CollectFiles( connection, files, shouldPrint, selectedVolumeOnly ? volume : null ) ) {
-						PrintSameFileInformation( textWriterWrapper.Writer, sameFiles );
-					}
-				} else {
-					PrintVolumeInformation( textWriterWrapper.Writer, GetKnownVolumes( connection ) );
+				long? v = null;
+				if ( volume != 0 ) {
+					v = volume;
+				}
+				List<StorageFile> files = GetKnownFilesOnVolume( connection, v );
+				foreach ( var sameFiles in CollectFiles( connection, files, shouldPrint, selectedVolumeOnly ? v : null ) ) {
+					PrintSameFileInformation( textWriterWrapper.Writer, sameFiles );
 				}
 
 				connection.Close();
