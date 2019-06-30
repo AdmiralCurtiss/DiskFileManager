@@ -57,6 +57,9 @@ namespace DiskFileManager {
 	public class QuickfindMultipleOptions : BaseOptions {
 		[Option( 'v', "volume", Required = true, HelpText = "Volume ID to find files of." )]
 		public int Volume { get; set; }
+
+		[Option( 'd', "interactive-delete-mode", Default = false, Required = false, HelpText = "Start interactive duplicate deletion mode." )]
+		public bool InteractiveDeleteMode { get; set; }
 	}
 
 	[Verb( "exclusive" )]
@@ -97,7 +100,11 @@ namespace DiskFileManager {
 		}
 
 		private static int QuickfindMultipleCopiesOnSameVolume( QuickfindMultipleOptions a ) {
-			return ListFiles( a.LogPath, a.DatabasePath, a.Volume, true, ( x ) => x.Count >= 2 );
+			if ( a.InteractiveDeleteMode ) {
+				return RunInteractiveFileDeleteMode( a.DatabasePath, a.Volume );
+			} else {
+				return ListFiles( a.LogPath, a.DatabasePath, a.Volume, true, ( x ) => x.Count >= 2 );
+			}
 		}
 
 		private static int QuickfindFilesExclusiveToVolume( QuickfindExclusiveOptions a ) {
@@ -151,6 +158,55 @@ namespace DiskFileManager {
 			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + databasePath ) ) {
 				connection.Open();
 				PrintVolumeInformation( textWriterWrapper.Writer, GetKnownVolumes( connection ) );
+				connection.Close();
+			}
+
+			return 0;
+		}
+
+		private static int RunInteractiveFileDeleteMode( string databasePath, int volume ) {
+			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + databasePath ) ) {
+				connection.Open();
+
+				List<StorageFile> files = GetKnownFilesOnVolume( connection, volume );
+				foreach ( var sameFiles in CollectFiles( connection, files, ( x ) => x.Count >= 2, volume ) ) {
+					Console.WriteLine();
+					Console.WriteLine( " ================================================================== " );
+					Console.WriteLine();
+					Console.WriteLine( "File #{0}", sameFiles[0].FileId );
+					Console.WriteLine( "{0:N0} bytes", sameFiles[0].Size );
+					Console.WriteLine( "Exists in {0} places:", sameFiles.Count );
+					for ( int i = 0; i < sameFiles.Count; ++i ) {
+						var sf = sameFiles[i];
+						Console.WriteLine( " No. {0}: {1}/{2}", i, sf.Path, sf.Filename );
+					}
+
+					while ( true ) {
+						Console.WriteLine( "Enter number of file to keep, nothing to skip." );
+						Console.Write( " > " );
+
+						string input = Console.ReadLine();
+						if ( input == "" ) {
+							break;
+						}
+
+						int number;
+						if ( int.TryParse( input, out number ) ) {
+							if ( number >= 0 && number < sameFiles.Count ) {
+								for ( int i = 0; i < sameFiles.Count; ++i ) {
+									var sf = sameFiles[i];
+									if ( i == number ) {
+										Console.WriteLine( " Would keep: No. {0}: {1}/{2}", i, sf.Path, sf.Filename );
+									} else {
+										Console.WriteLine( " Would delete: No. {0}: {1}/{2}", i, sf.Path, sf.Filename );
+									}
+								}
+								break;
+							}
+						}
+					}
+				}
+
 				connection.Close();
 			}
 
