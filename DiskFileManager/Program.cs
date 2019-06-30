@@ -120,13 +120,7 @@ namespace DiskFileManager {
 					t.Commit();
 				}
 
-				List<Volume> volumes = new List<Volume>();
-				foreach ( ManagementObject vol in new ManagementClass( "Win32_Volume" ).GetInstances() ) {
-					string id = vol.Properties["DeviceID"].Value.ToString();
-					string label = vol?.Properties["Label"]?.Value?.ToString() ?? "";
-					volumes.Add( CreateOrFindVolume( connection, id, label ) );
-				}
-
+				var volumes = FindAndInsertAttachedVolumes( connection );
 				foreach ( Volume v in volumes ) {
 					ProcessVolume( textWriterWrapper.Writer, connection, v );
 				}
@@ -135,6 +129,16 @@ namespace DiskFileManager {
 			}
 
 			return 0;
+		}
+
+		private static List<Volume> FindAndInsertAttachedVolumes( SQLiteConnection connection ) {
+			List<Volume> volumes = new List<Volume>();
+			foreach ( ManagementObject vol in new ManagementClass( "Win32_Volume" ).GetInstances() ) {
+				string id = vol.Properties["DeviceID"].Value.ToString();
+				string label = vol?.Properties["Label"]?.Value?.ToString() ?? "";
+				volumes.Add( CreateOrFindVolume( connection, id, label ) );
+			}
+			return volumes;
 		}
 
 		private static int List( ListOptions args ) {
@@ -164,12 +168,23 @@ namespace DiskFileManager {
 			return 0;
 		}
 
-		private static int RunInteractiveFileDeleteMode( string databasePath, int volume ) {
+		private static int RunInteractiveFileDeleteMode( string databasePath, long volumeId ) {
 			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + databasePath ) ) {
 				connection.Open();
 
-				List<StorageFile> files = GetKnownFilesOnVolume( connection, volume );
-				foreach ( var sameFiles in CollectFiles( connection, files, ( x ) => x.Count >= 2, volume ) ) {
+				Volume volume;
+				{
+					var volumes = FindAndInsertAttachedVolumes( connection );
+					volume = volumes.FirstOrDefault( ( x ) => x.ID == volumeId );
+				}
+				if ( volume == null ) {
+					Console.WriteLine( "Volume {0} is not attached.", volumeId );
+					return -1;
+				}
+
+
+				List<StorageFile> files = GetKnownFilesOnVolume( connection, volumeId );
+				foreach ( var sameFiles in CollectFiles( connection, files, ( x ) => x.Count >= 2, volumeId ) ) {
 					Console.WriteLine();
 					Console.WriteLine( " ================================================================== " );
 					Console.WriteLine();
@@ -182,23 +197,50 @@ namespace DiskFileManager {
 					}
 
 					while ( true ) {
-						Console.WriteLine( "Enter number of file to keep, nothing to skip." );
+						Console.WriteLine( "Enter number of file to keep, nothing to skip, q to quit." );
 						Console.Write( " > " );
 
 						string input = Console.ReadLine();
 						if ( input == "" ) {
 							break;
 						}
+						if ( input == "q" ) {
+							return -2;
+						}
 
 						int number;
 						if ( int.TryParse( input, out number ) ) {
 							if ( number >= 0 && number < sameFiles.Count ) {
+								List<(FileInfo fi, bool shouldDelete)> data = new List<(FileInfo fi, bool shouldDelete)>();
 								for ( int i = 0; i < sameFiles.Count; ++i ) {
 									var sf = sameFiles[i];
-									if ( i == number ) {
-										Console.WriteLine( " Would keep: No. {0}: {1}/{2}", i, sf.Path, sf.Filename );
+									string path;
+									if ( sf.Path == "" || sf.Path == "/" || sf.Path == "\\" ) {
+										path = Path.Combine( volume.DeviceID, sf.Filename );
+									} else if ( sf.Path[0] == '/' || sf.Path[0] == '\\' ) {
+										path = Path.Combine( volume.DeviceID, sf.Path.Substring( 1 ).Replace( '/', '\\' ), sf.Filename );
 									} else {
-										Console.WriteLine( " Would delete: No. {0}: {1}/{2}", i, sf.Path, sf.Filename );
+										Console.WriteLine( "Unexpected path in database: " + sf.Path );
+										break;
+									}
+									data.Add( (new FileInfo( path ), i != number) );
+								}
+
+								bool inconsistent = false;
+								foreach ( var d in data ) {
+									if ( !d.fi.Exists ) {
+										Console.WriteLine( "Inconsistent file state: File {0} does not actually exist on disk.", d.fi.FullName );
+										inconsistent = true;
+									}
+								}
+								if ( !inconsistent ) {
+									foreach ( var d in data ) {
+										if ( d.shouldDelete ) {
+											Console.WriteLine( "Deleting {0}", d.fi.FullName );
+											d.fi.Delete();
+										} else {
+											Console.WriteLine( "Keeping {0}", d.fi.FullName );
+										}
 									}
 								}
 								break;
