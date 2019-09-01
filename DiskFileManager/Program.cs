@@ -60,6 +60,9 @@ namespace DiskFileManager {
 
 		[Option( 'd', "interactive-delete-mode", Default = false, Required = false, HelpText = "Start interactive duplicate deletion mode." )]
 		public bool InteractiveDeleteMode { get; set; }
+
+		[Option( "subdir", Default = null, Required = false, HelpText = "Only look in a specific subdirectory." )]
+		public string Subdir { get; set; }
 	}
 
 	[Verb( "exclusive" )]
@@ -100,10 +103,11 @@ namespace DiskFileManager {
 		}
 
 		private static int QuickfindMultipleCopiesOnSameVolume( QuickfindMultipleOptions a ) {
+			ShouldPrint shouldPrint = ( x ) => x.Count >= 2 && ( a.Subdir == null || x.Any( ( y ) => y.Path.StartsWith( a.Subdir, true, System.Globalization.CultureInfo.InvariantCulture ) ) );
 			if ( a.InteractiveDeleteMode ) {
-				return RunInteractiveFileDeleteMode( a.DatabasePath, a.Volume );
+				return RunInteractiveFileDeleteMode( a.DatabasePath, a.Volume, shouldPrint );
 			} else {
-				return ListFiles( a.LogPath, a.DatabasePath, a.Volume, true, ( x ) => x.Count >= 2 );
+				return ListFiles( a.LogPath, a.DatabasePath, a.Volume, true, shouldPrint );
 			}
 		}
 
@@ -168,7 +172,7 @@ namespace DiskFileManager {
 			return 0;
 		}
 
-		private static int RunInteractiveFileDeleteMode( string databasePath, long volumeId ) {
+		private static int RunInteractiveFileDeleteMode( string databasePath, long volumeId, ShouldPrint shouldPrint ) {
 			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + databasePath ) ) {
 				connection.Open();
 
@@ -184,7 +188,7 @@ namespace DiskFileManager {
 
 
 				List<StorageFile> files = GetKnownFilesOnVolume( connection, volumeId );
-				foreach ( var sameFiles in CollectFiles( connection, files, ( x ) => x.Count >= 2, volumeId ) ) {
+				foreach ( var sameFiles in CollectFiles( connection, files, shouldPrint, volumeId ) ) {
 					Console.WriteLine();
 					Console.WriteLine( " ================================================================== " );
 					Console.WriteLine();
