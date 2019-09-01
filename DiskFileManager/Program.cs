@@ -292,7 +292,7 @@ namespace DiskFileManager {
 
 		private static void PrintVolumeInformation( TextWriter stdout, List<Volume> volumes ) {
 			foreach ( var volume in volumes ) {
-				stdout.WriteLine( "Volume #{0}: {1}", volume.ID, volume.Label );
+				stdout.WriteLine( "Volume #{0,3}: {1,-40} [{2,19:N0} free / {3,19:N0} total]", volume.ID, volume.Label, volume.FreeSpace, volume.TotalSpace );
 			}
 		}
 
