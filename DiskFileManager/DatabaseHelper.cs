@@ -19,8 +19,12 @@ namespace DiskFileManager {
 				"id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
 				"guid TEXT NOT NULL, " +
 				"label TEXT NOT NULL, " +
+				"totalSpace INTEGER NOT NULL, " +
+				"freeSpace INTEGER NOT NULL, " +
 				"shouldScan BOOLEAN NOT NULL" +
 			")" );
+			//HyoutaTools.SqliteUtil.Update( t, "ALTER TABLE Volumes ADD totalSpace INTEGER NOT NULL default 0" );
+			//HyoutaTools.SqliteUtil.Update( t, "ALTER TABLE Volumes ADD freeSpace INTEGER NOT NULL default 0" );
 			HyoutaTools.SqliteUtil.Update( t, "CREATE TABLE IF NOT EXISTS Pathnames (" +
 				"id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
 				"name TEXT NOT NULL, " + // directory path, unix separator, no drive letter; no filename

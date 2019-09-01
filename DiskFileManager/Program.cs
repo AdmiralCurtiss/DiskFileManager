@@ -140,7 +140,9 @@ namespace DiskFileManager {
 			foreach ( ManagementObject vol in new ManagementClass( "Win32_Volume" ).GetInstances() ) {
 				string id = vol.Properties["DeviceID"].Value.ToString();
 				string label = vol?.Properties["Label"]?.Value?.ToString() ?? "";
-				volumes.Add( CreateOrFindVolume( connection, id, label ) );
+				ulong capacity = (ulong)( vol?.Properties["Capacity"]?.Value ?? 0 );
+				ulong freeSpace = (ulong)( vol?.Properties["FreeSpace"]?.Value ?? 0 );
+				volumes.Add( CreateOrFindVolume( connection, id, label, (long)capacity, (long)freeSpace ) );
 			}
 			return volumes;
 		}
@@ -325,14 +327,16 @@ namespace DiskFileManager {
 		private static List<Volume> GetKnownVolumes( SQLiteConnection connection ) {
 			List<Volume> volumes = new List<Volume>();
 			using ( IDbTransaction t = connection.BeginTransaction() ) {
-				List<object[]> rv = HyoutaTools.SqliteUtil.SelectArray( t, "SELECT id, guid, label, shouldScan FROM Volumes ORDER BY id ASC", new object[0] );
+				List<object[]> rv = HyoutaTools.SqliteUtil.SelectArray( t, "SELECT id, guid, label, totalSpace, freeSpace, shouldScan FROM Volumes ORDER BY id ASC", new object[0] );
 				if ( rv != null ) {
 					foreach ( object[] r in rv ) {
 						volumes.Add( new Volume() {
 							ID = (long)r[0],
 							DeviceID = (string)r[1],
 							Label = (string)r[2],
-							ShouldScan = (bool)r[3],
+							TotalSpace = (long)r[3],
+							FreeSpace = (long)r[4],
+							ShouldScan = (bool)r[5],
 						} );
 					}
 				}
@@ -606,15 +610,20 @@ namespace DiskFileManager {
 			}
 		}
 
-		private static Volume CreateOrFindVolume( SQLiteConnection connection, string id, string label ) {
+		private static Volume CreateOrFindVolume( SQLiteConnection connection, string id, string label, long totalSpace, long freeSpace ) {
 			using ( IDbTransaction t = connection.BeginTransaction() ) {
 				List<object[]> rv = HyoutaTools.SqliteUtil.SelectArray( t, "SELECT id, shouldScan FROM Volumes WHERE guid = ?", new object[] { id } );
+				long internalId;
 				if ( rv == null || rv.Count == 0 ) {
-					HyoutaTools.SqliteUtil.Update( t, "INSERT INTO Volumes ( guid, label, shouldScan ) VALUES ( ?, ?, ? )", new object[] { id, label, true } );
+					HyoutaTools.SqliteUtil.Update( t, "INSERT INTO Volumes ( guid, label, totalSpace, freeSpace, shouldScan ) VALUES ( ?, ?, ?, ?, ? )", new object[] { id, label, totalSpace, freeSpace, true } );
 					rv = HyoutaTools.SqliteUtil.SelectArray( t, "SELECT id, shouldScan FROM Volumes WHERE guid = ?", new object[] { id } );
-					t.Commit();
+					internalId = (long)rv[0][0];
+				} else {
+					internalId = (long)rv[0][0];
+					HyoutaTools.SqliteUtil.Update( t, "UPDATE Volumes SET totalSpace = ?, freeSpace = ? WHERE id = ?", new object[] { totalSpace, freeSpace, internalId } );
 				}
-				return new Volume() { DeviceID = id, Label = label, ID = (long)rv[0][0], ShouldScan = (bool)rv[0][1] };
+				t.Commit();
+				return new Volume() { DeviceID = id, Label = label, ID = internalId, TotalSpace = totalSpace, FreeSpace = freeSpace, ShouldScan = (bool)rv[0][1] };
 			}
 		}
 	}

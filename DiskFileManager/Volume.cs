@@ -9,6 +9,8 @@ namespace DiskFileManager {
 		public long ID;
 		public string DeviceID;
 		public string Label;
+		public long TotalSpace;
+		public long FreeSpace;
 		public bool ShouldScan;
 	}
 }
