@@ -58,6 +58,7 @@
     <Compile Include="StorageFile.cs" />
     <Compile Include="Util.cs" />
     <Compile Include="Volume.cs" />
+    <Compile Include="Win32Util.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

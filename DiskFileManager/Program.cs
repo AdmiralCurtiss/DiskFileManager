@@ -5,10 +5,6 @@ using System.Data;
 using System.Data.SQLite;
 using System.IO;
 using System.Linq;
-using System.Management;
-using System.Security.Cryptography;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace DiskFileManager {
 	public class BaseOptions {
@@ -137,12 +133,8 @@ namespace DiskFileManager {
 
 		private static List<Volume> FindAndInsertAttachedVolumes( SQLiteConnection connection ) {
 			List<Volume> volumes = new List<Volume>();
-			foreach ( ManagementObject vol in new ManagementClass( "Win32_Volume" ).GetInstances() ) {
-				string id = vol.Properties["DeviceID"].Value.ToString();
-				string label = vol?.Properties["Label"]?.Value?.ToString() ?? "";
-				ulong capacity = (ulong)( vol?.Properties["Capacity"]?.Value ?? 0 );
-				ulong freeSpace = (ulong)( vol?.Properties["FreeSpace"]?.Value ?? 0 );
-				volumes.Add( CreateOrFindVolume( connection, id, label, (long)capacity, (long)freeSpace ) );
+			foreach ( Win32Volume vol in Win32Util.GetAttachedVolumes() ) {
+				volumes.Add( CreateOrFindVolume( connection, vol.Id, vol.Label, (long)vol.Capacity, (long)vol.FreeSpace ) );
 			}
 			return volumes;
 		}
