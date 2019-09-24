@@ -167,7 +167,7 @@ namespace DiskFileManager {
 			using ( TextWriterWrapper textWriterWrapper = new TextWriterWrapper( logPath ) )
 			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + databasePath ) ) {
 				connection.Open();
-				PrintVolumeInformation( textWriterWrapper.Writer, GetKnownVolumes( connection ) );
+				PrintVolumeInformation( textWriterWrapper.Writer, GetKnownVolumes( connection ).Where( x => x.ShouldScan ) );
 				connection.Close();
 			}
 
@@ -290,8 +290,8 @@ namespace DiskFileManager {
 			return 0;
 		}
 
-		private static void PrintVolumeInformation( TextWriter stdout, List<Volume> volumes ) {
-			foreach ( var volume in volumes ) {
+		private static void PrintVolumeInformation( TextWriter stdout, IEnumerable<Volume> volumes ) {
+			foreach ( var volume in volumes.OrderBy( x => x.Label ) ) {
 				stdout.WriteLine( "Volume #{0,3}: {1,-40} [{2,19:N0} free / {3,19:N0} total]", volume.ID, volume.Label, volume.FreeSpace, volume.TotalSpace );
 			}
 		}
