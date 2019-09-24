@@ -28,11 +28,11 @@ namespace DiskFileManager {
 		public string LogPath { get; set; }
 	}
 
-	[Verb( "scan" )]
+	[Verb( "scan", HelpText = "Scan currently attached volumes for new, removed, or changed files." )]
 	public class ScanOptions : BaseOptions {
 	}
 
-	[Verb( "list" )]
+	[Verb( "list", HelpText = "List volumes or files." )]
 	public class ListOptions : BaseOptions {
 		[Option( 'v', "volume", Default = null, Required = false, HelpText = "Volume ID to list files of. 0 to list all volumes." )]
 		public int? Volume { get; set; }
@@ -47,13 +47,13 @@ namespace DiskFileManager {
 		public int? MaxInstanceCount { get; set; }
 	}
 
-	[Verb( "search" )]
+	[Verb( "search", HelpText = "Search for files." )]
 	public class SearchOptions : BaseOptions {
 		[Option( 'f', "filename", Default = null, Required = true, HelpText = "Search pattern for filename." )]
 		public string File { get; set; }
 	}
 
-	[Verb( "multi" )]
+	[Verb( "multi", HelpText = "Find files that exist in multiple places on the same volume." )]
 	public class QuickfindMultipleOptions : BaseOptions {
 		[Option( 'v', "volume", Required = true, HelpText = "Volume ID to find files of." )]
 		public int Volume { get; set; }
@@ -65,7 +65,7 @@ namespace DiskFileManager {
 		public string Subdir { get; set; }
 	}
 
-	[Verb( "exclusive" )]
+	[Verb( "exclusive", HelpText = "Find files that only exist on one volume (no backups!)." )]
 	public class QuickfindExclusiveOptions : BaseOptions {
 		[Option( 'v', "volume", Required = true, HelpText = "Volume ID to find files of." )]
 		public int Volume { get; set; }
