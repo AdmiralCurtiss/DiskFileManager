@@ -16,7 +16,8 @@ public:
     Archive(const std::filesystem::path& path);
     ~Archive();
     bool IsValid() const;
-    const File* GetNext();
+    const File* GetCurrent();
+    void Advance();
 
 private:
     std::vector<File> Files;

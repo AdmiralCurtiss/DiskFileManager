@@ -8,6 +8,7 @@ extern "C" {
 #include <codecvt>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <locale>
 #include <memory>
 #include <string>
@@ -45,7 +46,7 @@ HANDLE __stdcall OpenArchiveW(tOpenArchiveDataW* ArchiveData) {
 int __stdcall ReadHeaderExW(HANDLE hArcData, tHeaderDataExW* HeaderDataEx) {
     try {
         DiskFileManager::Archive* archive = static_cast<DiskFileManager::Archive*>(hArcData);
-        const DiskFileManager::File* file = archive->GetNext();
+        const DiskFileManager::File* file = archive->GetCurrent();
         if (file) {
             std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter; // FIXME: apparently deprecated?
             std::wstring wstr = converter.from_bytes(file->Filename);
@@ -70,10 +71,43 @@ int __stdcall ReadHeaderExW(HANDLE hArcData, tHeaderDataExW* HeaderDataEx) {
 }
 
 int __stdcall ProcessFileW(HANDLE hArcData, int Operation, WCHAR* DestPath, WCHAR* DestName) {
-    if (Operation == PK_SKIP) {
-        return 0;
-    } else {
-        return E_NOT_SUPPORTED;
+    try {
+        DiskFileManager::Archive* archive = static_cast<DiskFileManager::Archive*>(hArcData);
+        if (Operation == PK_SKIP || Operation == PK_TEST) {
+            archive->Advance();
+            return 0;
+        } else if (Operation == PK_EXTRACT) {
+            const DiskFileManager::File* file = archive->GetCurrent();
+
+            int errcode = 0;
+            {
+                std::ofstream of;
+                if (DestPath == NULL) {
+                    of = std::ofstream(DestName, std::ios_base::out | std::ios_base::binary);
+                } else {
+                    of = std::ofstream(std::wstring(DestPath) + L'/' + std::wstring(DestName),
+                                       std::ios_base::out | std::ios_base::binary);
+                }
+
+                if (of.good()) {
+                    of << file->Filesize << std::endl << file->Filename << std::flush;
+                    if (of.good()) {
+                        of.close();
+                    } else {
+                        errcode = E_EWRITE;
+                    }
+                } else {
+                    errcode = E_ECREATE;
+                }
+            }
+
+            archive->Advance();
+            return errcode;
+        } else {
+            return E_NOT_SUPPORTED;
+        }
+    } catch (...) {
+        return E_BAD_ARCHIVE;
     }
 }
 

@@ -96,11 +96,13 @@ bool DiskFileManager::Archive::IsValid() const {
     return Valid;
 }
 
-const DiskFileManager::File* DiskFileManager::Archive::GetNext() {
+const DiskFileManager::File* DiskFileManager::Archive::GetCurrent() {
     if (CurrentIndex < Files.size()) {
-        const File* f = &Files[CurrentIndex];
-        ++CurrentIndex;
-        return f;
+        return &Files[CurrentIndex];
     }
     return nullptr;
+}
+
+void DiskFileManager::Archive::Advance() {
+    ++CurrentIndex;
 }
