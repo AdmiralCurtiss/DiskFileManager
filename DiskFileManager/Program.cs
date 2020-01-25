@@ -259,8 +259,9 @@ namespace DiskFileManager {
 				connection.Open();
 
 				List<StorageFile> files = GetKnownFilesOnVolume( connection, volume );
+				List<Volume> volumes = GetKnownVolumes( connection );
 				foreach ( var sameFiles in CollectFiles( connection, files, shouldPrint, selectedVolumeOnly ? volume : null ) ) {
-					PrintSameFileInformation( textWriterWrapper.Writer, sameFiles );
+					PrintSameFileInformation( textWriterWrapper.Writer, sameFiles, volumes );
 				}
 
 				connection.Close();
@@ -273,8 +274,9 @@ namespace DiskFileManager {
 			using ( TextWriterWrapper textWriterWrapper = new TextWriterWrapper( args.LogPath ) )
 			using ( SQLiteConnection connection = new SQLiteConnection( "Data Source=" + args.DatabasePath ) ) {
 				connection.Open();
+				List<Volume> volumes = GetKnownVolumes( connection );
 				foreach ( var sameFiles in CollectFiles( connection, GetFilesWithFilename( connection, "%" + args.File + "%" ), (x) => true ) ) {
-					PrintSameFileInformation( textWriterWrapper.Writer, sameFiles );
+					PrintSameFileInformation( textWriterWrapper.Writer, sameFiles, volumes );
 				}
 				connection.Close();
 			}
@@ -288,13 +290,14 @@ namespace DiskFileManager {
 			}
 		}
 
-		private static void PrintSameFileInformation( TextWriter stdout, List<StorageFile> sameFiles ) {
+		private static void PrintSameFileInformation( TextWriter stdout, List<StorageFile> sameFiles, List<Volume> volumes ) {
 			if ( sameFiles.Count > 0 ) {
 				stdout.WriteLine( "File #{0}", sameFiles[0].FileId );
 				stdout.WriteLine( "{0:N0} bytes", sameFiles[0].Size );
 				stdout.WriteLine( "Exists in {0} places:", sameFiles.Count );
 				foreach ( var sf in sameFiles ) {
-					stdout.WriteLine( "  Volume #{0}, {1}/{2}", sf.VolumeId, sf.Path, sf.Filename );
+					Volume vol = volumes.Where(x => x.ID == sf.VolumeId).FirstOrDefault();
+					stdout.WriteLine( "  Volume #{0} [{1}], {2}/{3}", sf.VolumeId, vol != null ? vol.Label : "?", sf.Path, sf.Filename );
 				}
 				stdout.WriteLine();
 			}
