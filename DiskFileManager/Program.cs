@@ -561,9 +561,10 @@ namespace DiskFileManager {
 
 		private static StorageFile InsertOrUpdateFile(SQLiteConnection connection, Volume volume, string dirPath, string name, long filesize, byte[] hash, byte[] shorthash, DateTime lastWriteTimeUtc) {
 			using (IDbTransaction t = connection.BeginTransaction()) {
+				long timestamp = HyoutaTools.Util.DateTimeToUnixTime(lastWriteTimeUtc);
 				var rv = HyoutaTools.SqliteUtil.SelectScalar(t, "SELECT id FROM Files WHERE size = ? AND hash = ? AND shorthash = ?", new object[] { filesize, hash, shorthash });
 				if (rv == null) {
-					HyoutaTools.SqliteUtil.Update(t, "INSERT INTO Files ( size, hash, shorthash ) VALUES ( ?, ?, ? )", new object[] { filesize, hash, shorthash });
+					HyoutaTools.SqliteUtil.Update(t, "INSERT INTO Files ( size, hash, shorthash, timestamp ) VALUES ( ?, ?, ?, ? )", new object[] { filesize, hash, shorthash, timestamp });
 					rv = HyoutaTools.SqliteUtil.SelectScalar(t, "SELECT id FROM Files WHERE size = ? AND hash = ? AND shorthash = ?", new object[] { filesize, hash, shorthash });
 				}
 
@@ -572,7 +573,6 @@ namespace DiskFileManager {
 				long filenameId = DatabaseHelper.InsertOrUpdateFilename(t, name);
 
 				rv = HyoutaTools.SqliteUtil.SelectScalar(t, "SELECT id FROM Storage WHERE pathId = ? AND filenameId = ?", new object[] { pathId, filenameId });
-				long timestamp = HyoutaTools.Util.DateTimeToUnixTime(lastWriteTimeUtc);
 				long lastSeen = HyoutaTools.Util.DateTimeToUnixTime(DateTime.UtcNow);
 				long storageId;
 				if (rv == null) {
