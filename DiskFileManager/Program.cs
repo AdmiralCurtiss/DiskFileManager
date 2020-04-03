@@ -67,6 +67,26 @@ namespace DiskFileManager {
 		public int Volume { get; set; }
 	}
 
+	[Verb("archive", HelpText = "Define desired paths for files and move them there.")]
+	public class ArchiveOptions : BaseOptions {
+		[Option('n', "new-archive", Required = false, Default = null, HelpText = "Create a new archive.")]
+		public bool? NewArchive { get; set; }
+
+		[Option('m', "modify-archive", Required = false, HelpText = "Modify an existing archive, identified by ID.")]
+		public int? ModifyArchiveId { get; set; }
+
+		[Option("add-path", Required = false, HelpText = "Add new path.")]
+		public string AddPath { get; set; }
+
+		[Option("add-pattern", Required = false, HelpText = "Add new pattern.")]
+		public string AddPattern { get; set; }
+
+		[Option("begin", Required = false, Default = "20000101", HelpText = "Start timestamp for pattern, in format YYYYMMDD.")]
+		public string TimestampBegin { get; set; }
+
+		[Option("end", Required = false, Default = "20000101", HelpText = "End timestamp for pattern, in format YYYYMMDD.")]
+		public string TimestampEnd { get; set; }
+	}
 
 	class TextWriterWrapper : IDisposable {
 		public TextWriter Writer { get; private set; }
@@ -88,12 +108,13 @@ namespace DiskFileManager {
 
 	class Program {
 		static int Main(string[] args) {
-			return Parser.Default.ParseArguments<ScanOptions, ListOptions, SearchOptions, QuickfindMultipleOptions, QuickfindExclusiveOptions>(args).MapResult(
+			return Parser.Default.ParseArguments<ScanOptions, ListOptions, SearchOptions, QuickfindMultipleOptions, QuickfindExclusiveOptions, ArchiveOptions>(args).MapResult(
 				(ScanOptions a) => Scan(a),
 				(ListOptions a) => List(a),
 				(SearchOptions a) => Search(a),
 				(QuickfindMultipleOptions a) => QuickfindMultipleCopiesOnSameVolume(a),
 				(QuickfindExclusiveOptions a) => QuickfindFilesExclusiveToVolume(a),
+				(ArchiveOptions a) => Archive(a),
 				errs => -1
 			);
 		}
@@ -120,7 +141,7 @@ namespace DiskFileManager {
 					t.Commit();
 				}
 
-				var volumes = FindAndInsertAttachedVolumes(connection);
+				var volumes = VolumeOperations.FindAndInsertAttachedVolumes(connection);
 				foreach (Volume v in volumes) {
 					ProcessVolume(textWriterWrapper.Writer, connection, v);
 				}
@@ -131,12 +152,52 @@ namespace DiskFileManager {
 			return 0;
 		}
 
-		private static List<Volume> FindAndInsertAttachedVolumes(SQLiteConnection connection) {
-			List<Volume> volumes = new List<Volume>();
-			foreach (Win32Volume vol in Win32Util.GetAttachedVolumes()) {
-				volumes.Add(CreateOrFindVolume(connection, vol.Id, vol.Label, (long)vol.Capacity, (long)vol.FreeSpace));
+		private static DateTime DateTimeFromYYYYMMDD(string s) {
+			return DateTime.ParseExact(s, "yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal);
+		}
+
+		private static int Archive(ArchiveOptions a) {
+			if (a.NewArchive.HasValue && a.NewArchive.Value) {
+				return ProcessNewArchive(a.LogPath, a.DatabasePath);
 			}
-			return volumes;
+
+			if (a.ModifyArchiveId.HasValue) {
+				return ProcessModifyArchive(a.LogPath, a.DatabasePath, a.ModifyArchiveId.Value, a.AddPath, a.AddPattern, DateTimeFromYYYYMMDD(a.TimestampBegin), DateTimeFromYYYYMMDD(a.TimestampEnd));
+			}
+
+			return ArchiveOperations.PrintExistingArchives(a.LogPath, a.DatabasePath);
+		}
+
+		private static int ProcessNewArchive(string logPath, string databasePath) {
+			int rv = -1;
+			using (TextWriterWrapper textWriterWrapper = new TextWriterWrapper(logPath))
+			using (SQLiteConnection connection = new SQLiteConnection("Data Source=" + databasePath)) {
+				connection.Open();
+				using (IDbTransaction t = connection.BeginTransaction()) {
+					DatabaseHelper.CreateTables(t);
+					rv = HyoutaTools.SqliteUtil.Update(t, "INSERT INTO Archives DEFAULT VALUES") == 1 ? 0 : -1;
+					if (rv == 0) {
+						t.Commit();
+					}
+				}
+				connection.Close();
+			}
+			return rv;
+		}
+
+		private static int ProcessModifyArchive(string logPath, string databasePath, int archiveId, string addPath, string addPattern, DateTime begin, DateTime end) {
+			using (TextWriterWrapper textWriterWrapper = new TextWriterWrapper(logPath))
+			using (SQLiteConnection connection = new SQLiteConnection("Data Source=" + databasePath)) {
+				connection.Open();
+				if (addPath != null) {
+					ArchiveOperations.AddPathToArchive(textWriterWrapper.Writer, connection, archiveId, addPath);
+				}
+				if (addPattern != null) {
+					ArchiveOperations.AddPatternToArchive(textWriterWrapper.Writer, connection, archiveId, addPattern, begin, end);
+				}
+				connection.Close();
+			}
+			return 0;
 		}
 
 		private static int List(ListOptions args) {
@@ -159,7 +220,7 @@ namespace DiskFileManager {
 			using (TextWriterWrapper textWriterWrapper = new TextWriterWrapper(logPath))
 			using (SQLiteConnection connection = new SQLiteConnection("Data Source=" + databasePath)) {
 				connection.Open();
-				PrintVolumeInformation(textWriterWrapper.Writer, GetKnownVolumes(connection).Where(x => x.ShouldScan));
+				PrintVolumeInformation(textWriterWrapper.Writer, VolumeOperations.GetKnownVolumes(connection).Where(x => x.ShouldScan));
 				connection.Close();
 			}
 
@@ -172,7 +233,7 @@ namespace DiskFileManager {
 
 				Volume volume;
 				{
-					var volumes = FindAndInsertAttachedVolumes(connection);
+					var volumes = VolumeOperations.FindAndInsertAttachedVolumes(connection);
 					volume = volumes.FirstOrDefault((x) => x.ID == volumeId);
 				}
 				if (volume == null) {
@@ -259,7 +320,7 @@ namespace DiskFileManager {
 				connection.Open();
 
 				List<StorageFile> files = GetKnownFilesOnVolume(connection, volume);
-				List<Volume> volumes = GetKnownVolumes(connection);
+				List<Volume> volumes = VolumeOperations.GetKnownVolumes(connection);
 				foreach (var sameFiles in CollectFiles(connection, files, shouldPrint, selectedVolumeOnly ? volume : null)) {
 					PrintSameFileInformation(textWriterWrapper.Writer, sameFiles, volumes);
 				}
@@ -274,7 +335,7 @@ namespace DiskFileManager {
 			using (TextWriterWrapper textWriterWrapper = new TextWriterWrapper(args.LogPath))
 			using (SQLiteConnection connection = new SQLiteConnection("Data Source=" + args.DatabasePath)) {
 				connection.Open();
-				List<Volume> volumes = GetKnownVolumes(connection);
+				List<Volume> volumes = VolumeOperations.GetKnownVolumes(connection);
 				foreach (var sameFiles in CollectFiles(connection, GetFilesWithFilename(connection, "%" + args.File + "%"), (x) => true)) {
 					PrintSameFileInformation(textWriterWrapper.Writer, sameFiles, volumes);
 				}
@@ -317,27 +378,6 @@ namespace DiskFileManager {
 					yield return sameFiles;
 				}
 			}
-		}
-
-		private static List<Volume> GetKnownVolumes(SQLiteConnection connection) {
-			List<Volume> volumes = new List<Volume>();
-			using (IDbTransaction t = connection.BeginTransaction()) {
-				List<object[]> rv = HyoutaTools.SqliteUtil.SelectArray(t, "SELECT id, guid, label, totalSpace, freeSpace, shouldScan FROM Volumes ORDER BY id ASC", new object[0]);
-				if (rv != null) {
-					foreach (object[] r in rv) {
-						volumes.Add(new Volume() {
-							ID = (long)r[0],
-							DeviceID = (string)r[1],
-							Label = (string)r[2],
-							TotalSpace = (long)r[3],
-							FreeSpace = (long)r[4],
-							ShouldScan = (bool)r[5],
-						});
-					}
-				}
-
-			}
-			return volumes;
 		}
 
 		private static List<StorageFile> GetStorageFilesForFileId(SQLiteConnection connection, long fileId, long? onlyOnVolume = null) {
@@ -602,23 +642,6 @@ namespace DiskFileManager {
 					Timestamp = HyoutaTools.Util.UnixTimeToDateTime(timestamp),
 					LastSeen = HyoutaTools.Util.UnixTimeToDateTime(updateTimestamp),
 				};
-			}
-		}
-
-		private static Volume CreateOrFindVolume(SQLiteConnection connection, string id, string label, long totalSpace, long freeSpace) {
-			using (IDbTransaction t = connection.BeginTransaction()) {
-				List<object[]> rv = HyoutaTools.SqliteUtil.SelectArray(t, "SELECT id, shouldScan FROM Volumes WHERE guid = ?", new object[] { id });
-				long internalId;
-				if (rv == null || rv.Count == 0) {
-					HyoutaTools.SqliteUtil.Update(t, "INSERT INTO Volumes ( guid, label, totalSpace, freeSpace, shouldScan ) VALUES ( ?, ?, ?, ?, ? )", new object[] { id, label, totalSpace, freeSpace, true });
-					rv = HyoutaTools.SqliteUtil.SelectArray(t, "SELECT id, shouldScan FROM Volumes WHERE guid = ?", new object[] { id });
-					internalId = (long)rv[0][0];
-				} else {
-					internalId = (long)rv[0][0];
-					HyoutaTools.SqliteUtil.Update(t, "UPDATE Volumes SET totalSpace = ?, freeSpace = ? WHERE id = ?", new object[] { totalSpace, freeSpace, internalId });
-				}
-				t.Commit();
-				return new Volume() { DeviceID = id, Label = label, ID = internalId, TotalSpace = totalSpace, FreeSpace = freeSpace, ShouldScan = (bool)rv[0][1] };
 			}
 		}
 	}

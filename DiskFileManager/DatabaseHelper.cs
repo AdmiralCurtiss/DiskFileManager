@@ -56,6 +56,24 @@ namespace DiskFileManager {
 				"UNIQUE(pathId, filenameId)" +
 			")");
 			HyoutaTools.SqliteUtil.Update(t, "CREATE INDEX IF NOT EXISTS StorageFileId ON Storage (fileId)");
+			HyoutaTools.SqliteUtil.Update(t, "CREATE TABLE IF NOT EXISTS Archives (" +
+				"id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL" +
+			")");
+			HyoutaTools.SqliteUtil.Update(t, "CREATE TABLE IF NOT EXISTS ArchivePaths (" +
+				"archiveId INTEGER NOT NULL, " +
+				"pathId INTEGER NOT NULL, " +
+				"FOREIGN KEY(archiveId) REFERENCES Archives(id), " +
+				"FOREIGN KEY(pathId) REFERENCES Paths(id), " +
+				"UNIQUE(archiveId, pathId)" +
+			")");
+			HyoutaTools.SqliteUtil.Update(t, "CREATE TABLE IF NOT EXISTS ArchivePatterns (" +
+				"id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+				"archiveId INTEGER NOT NULL, " +
+				"pattern TEXT NOT NULL, " +
+				"timestampBegin INTEGER NOT NULL, " +
+				"timestampEnd INTEGER NOT NULL, " +
+				"FOREIGN KEY(archiveId) REFERENCES Archives(id)" +
+			")");
 		}
 
 		public static long InsertOrUpdateFilename(IDbTransaction t, string name) {

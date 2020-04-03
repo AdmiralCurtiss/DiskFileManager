@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace DiskFileManager {
-	class Volume {
+	public class Volume {
 		public long ID;
 		public string DeviceID;
 		public string Label;

@@ -50,6 +50,8 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Archive.cs" />
+    <Compile Include="ArchiveOperations.cs" />
     <Compile Include="DatabaseHelper.cs" />
     <Compile Include="HashUtil.cs" />
     <Compile Include="Program.cs" />
@@ -58,6 +60,7 @@
     <Compile Include="StorageFile.cs" />
     <Compile Include="Util.cs" />
     <Compile Include="Volume.cs" />
+    <Compile Include="VolumeOperations.cs" />
     <Compile Include="Win32Util.cs" />
   </ItemGroup>
   <ItemGroup>
