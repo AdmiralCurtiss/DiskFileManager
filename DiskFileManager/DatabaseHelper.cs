@@ -13,8 +13,30 @@ namespace DiskFileManager {
 				"size INTERGER NOT NULL, " +
 				"shorthash BLOB NOT NULL, " +
 				"hash BLOB NOT NULL, " +
+				"timestamp INTEGER NOT NULL, " +
 				"UNIQUE(size, shorthash, hash)" +
 			")");
+			HyoutaTools.SqliteUtil.Update(t, "ALTER TABLE Files ADD COLUMN timestamp INTEGER");
+
+			{
+				var rv = HyoutaTools.SqliteUtil.SelectArray(t, "SELECT id, timestamp FROM Files ORDER BY id ASC", new object[0]);
+				foreach (var v in rv) {
+					if (v[1] == System.DBNull.Value) {
+						long id = (long)v[0];
+						var rvt = HyoutaTools.SqliteUtil.SelectArray(t, "SELECT timestamp FROM Storage WHERE fileId = ?", new object[] { id });
+						long nts = 0;
+						if (rvt.Count > 0) {
+							long tmpts = long.MaxValue;
+							foreach (var djkasjdkslja in rvt) {
+								tmpts = Math.Min(tmpts, (long)djkasjdkslja[0]);
+							}
+							nts = tmpts;
+						}
+						HyoutaTools.SqliteUtil.Update(t, "UPDATE Files SET timestamp = ? WHERE id = ?", new object[] { nts, id });
+					}
+				}
+			}
+
 			HyoutaTools.SqliteUtil.Update(t, "CREATE TABLE IF NOT EXISTS Volumes (" +
 				"id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
 				"guid TEXT NOT NULL, " +
