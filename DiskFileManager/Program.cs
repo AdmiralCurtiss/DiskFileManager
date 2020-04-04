@@ -86,6 +86,9 @@ namespace DiskFileManager {
 
 		[Option("end", Required = false, Default = "20000101", HelpText = "End timestamp for pattern, in format YYYYMMDD.")]
 		public string TimestampEnd { get; set; }
+
+		[Option("scan", Required = false, HelpText = "File or directory to try and archive.")]
+		public string ScanPath { get; set; }
 	}
 
 	class TextWriterWrapper : IDisposable {
@@ -165,6 +168,10 @@ namespace DiskFileManager {
 				return ProcessModifyArchive(a.LogPath, a.DatabasePath, a.ModifyArchiveId.Value, a.AddPath, a.AddPattern, DateTimeFromYYYYMMDD(a.TimestampBegin), DateTimeFromYYYYMMDD(a.TimestampEnd));
 			}
 
+			if (a.ScanPath != null) {
+				return ProcessArchiveScan(a.LogPath, a.DatabasePath, a.ScanPath);
+			}
+
 			return ArchiveOperations.PrintExistingArchives(a.LogPath, a.DatabasePath);
 		}
 
@@ -195,6 +202,16 @@ namespace DiskFileManager {
 				if (addPattern != null) {
 					ArchiveOperations.AddPatternToArchive(textWriterWrapper.Writer, connection, archiveId, addPattern, begin, end);
 				}
+				connection.Close();
+			}
+			return 0;
+		}
+
+		private static int ProcessArchiveScan(string logPath, string databasePath, string scanPath) {
+			using (TextWriterWrapper textWriterWrapper = new TextWriterWrapper(logPath))
+			using (SQLiteConnection connection = new SQLiteConnection("Data Source=" + databasePath)) {
+				connection.Open();
+				ArchiveOperations.DoArchiveScan(textWriterWrapper.Writer, connection, scanPath);
 				connection.Close();
 			}
 			return 0;
@@ -553,26 +570,20 @@ namespace DiskFileManager {
 					shorthash = HashUtil.CalculateShortHash(fs);
 					hash = HashUtil.CalculateHash(fs);
 				}
-				files.Add(InsertOrUpdateFile(connection, volume, dirPath, file.Name, filesize, hash, shorthash, file.LastWriteTimeUtc));
+				files.Add(InsertOrUpdateFileAndStorage(connection, volume, dirPath, file.Name, filesize, hash, shorthash, file.LastWriteTimeUtc));
 			} catch (UnauthorizedAccessException ex) {
 				stdout.WriteLine(ex.ToString());
 			}
 		}
 
-		private static StorageFile InsertOrUpdateFile(SQLiteConnection connection, Volume volume, string dirPath, string name, long filesize, byte[] hash, byte[] shorthash, DateTime lastWriteTimeUtc) {
+		private static StorageFile InsertOrUpdateFileAndStorage(SQLiteConnection connection, Volume volume, string dirPath, string name, long filesize, byte[] hash, byte[] shorthash, DateTime lastWriteTimeUtc) {
 			using (IDbTransaction t = connection.BeginTransaction()) {
 				long timestamp = HyoutaTools.Util.DateTimeToUnixTime(lastWriteTimeUtc);
-				var rv = HyoutaTools.SqliteUtil.SelectScalar(t, "SELECT id FROM Files WHERE size = ? AND hash = ? AND shorthash = ?", new object[] { filesize, hash, shorthash });
-				if (rv == null) {
-					HyoutaTools.SqliteUtil.Update(t, "INSERT INTO Files ( size, hash, shorthash, timestamp ) VALUES ( ?, ?, ?, ? )", new object[] { filesize, hash, shorthash, timestamp });
-					rv = HyoutaTools.SqliteUtil.SelectScalar(t, "SELECT id FROM Files WHERE size = ? AND hash = ? AND shorthash = ?", new object[] { filesize, hash, shorthash });
-				}
-
-				long fileId = (long)rv;
+				long fileId = FileOperations.InsertOrGetFile(t, filesize, hash, shorthash, lastWriteTimeUtc).fileId;
 				long pathId = DatabaseHelper.InsertOrUpdatePath(t, volume.ID, dirPath);
 				long filenameId = DatabaseHelper.InsertOrUpdateFilename(t, name);
 
-				rv = HyoutaTools.SqliteUtil.SelectScalar(t, "SELECT id FROM Storage WHERE pathId = ? AND filenameId = ?", new object[] { pathId, filenameId });
+				var rv = HyoutaTools.SqliteUtil.SelectScalar(t, "SELECT id FROM Storage WHERE pathId = ? AND filenameId = ?", new object[] { pathId, filenameId });
 				long lastSeen = HyoutaTools.Util.DateTimeToUnixTime(DateTime.UtcNow);
 				long storageId;
 				if (rv == null) {

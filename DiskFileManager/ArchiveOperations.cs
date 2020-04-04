@@ -115,5 +115,163 @@ namespace DiskFileManager {
 			}
 			return 0;
 		}
+
+		public static void DoArchiveScan(TextWriter writer, SQLiteConnection connection, string scanPath) {
+			bool fileExists = new FileInfo(scanPath).Exists;
+			bool dirExists = new DirectoryInfo(scanPath).Exists;
+			if (fileExists == dirExists) {
+				return;
+			}
+
+			List<Volume> volumes = VolumeOperations.FindAndInsertAttachedVolumes(connection);
+			List<Archive> archives = GetKnownArchives(connection);
+			if (fileExists) {
+				ScanFile(writer, connection, volumes, archives, new FileInfo(scanPath));
+			} else {
+				ScanDirectory(writer, connection, volumes, archives, scanPath);
+			}
+		}
+
+		public static void ScanDirectory(TextWriter writer, SQLiteConnection connection, List<Volume> volumes, List<Archive> archives, string path) {
+			writer.WriteLine("Scanning {0}...", path);
+			foreach (var fsi in new DirectoryInfo(path).GetFileSystemInfos()) {
+				if (fsi is FileInfo) {
+					ScanFile(writer, connection, volumes, archives, fsi as FileInfo);
+				} else if (fsi is DirectoryInfo) {
+					ScanDirectory(writer, connection, volumes, archives, fsi.FullName);
+				}
+			}
+		}
+
+		public static void ScanFile(TextWriter writer, SQLiteConnection connection, List<Volume> volumes, List<Archive> archives, FileInfo file) {
+			// identify this file
+			writer.WriteLine();
+			writer.WriteLine("Identifying {0}...", file.FullName);
+			FileIdentity identity = FileOperations.IdentifyFile(file.FullName);
+			DateTime timestamp;
+			using (IDbTransaction t = connection.BeginTransaction()) {
+				timestamp = FileOperations.InsertOrGetFile(t, identity.Filesize, identity.Hash, identity.ShortHash, file.LastWriteTimeUtc).timestamp;
+				t.Commit();
+			}
+
+			// with this canonical timestamp, find all archive patterns that match this file
+			string name = file.Name;
+			List<Archive> matchingArchives = new List<Archive>();
+			foreach (Archive a in archives) {
+				foreach (ArchivePattern p in a.Patterns) {
+					if (timestamp >= p.TimestampBegin && timestamp <= p.TimestampEnd && MatchPattern(name, p.Pattern)) {
+						matchingArchives.Add(a);
+						break;
+					}
+				}
+			}
+
+			if (matchingArchives.Count == 0) {
+				writer.WriteLine("File {0} does not fit into any archive.", file.FullName);
+				return;
+			}
+
+			if (matchingArchives.Count > 1) {
+				writer.WriteLine("File {0} does fit into {1} archives. Archive configuration error?", file.FullName, matchingArchives.Count);
+				return;
+			}
+
+			if (matchingArchives.Count != 1) {
+				throw new Exception("???");
+			}
+
+			Archive matchingArchive = matchingArchives[0];
+			if (matchingArchive.Paths.Count <= 0) {
+				writer.WriteLine("File {0} fits into archive, but archive has no defined paths.", file.FullName);
+				return;
+			}
+
+			writer.WriteLine("File {0} fits into archive {1}", file.FullName, matchingArchive.ArchiveId);
+
+			// alright now we have to
+			// - copy this file into every path
+			// - if and only if the file was successfully copied into every path, delete it from the source, otherwise leave it alone
+			// be sure to special case things like current file == target file!!
+			long successfulCopies = 0;
+			bool allowDelete = true;
+			string sourcePath = file.FullName;
+			foreach (ArchivePath p in matchingArchive.Paths) {
+				try {
+					Volume vol = volumes.FirstOrDefault(x => x.ID == p.VolumeId);
+					if (vol == null) {
+						writer.WriteLine("Volume {0} appears to not be attached.", p.VolumeId);
+						allowDelete = false;
+						continue;
+					}
+
+					string targetPath = CreateFilePath(vol.DeviceID, p.Path, name);
+					bool existedBefore = File.Exists(targetPath);
+					if (!existedBefore) {
+						// file does not exist at target yet, copy over
+						writer.WriteLine("Copying file to {0}...", targetPath);
+						File.Copy(sourcePath, targetPath);
+					}
+
+					if (File.Exists(targetPath)) {
+						writer.WriteLine("Identifying {0}...", targetPath);
+						FileIdentity existingTargetIdentity = FileOperations.IdentifyFile(targetPath);
+						if (identity == existingTargetIdentity) {
+							if (existedBefore) {
+								// TODO: check here if source file == target file!!!
+								// for now to be safe just inhibit delete
+								allowDelete = false;
+							}
+							writer.WriteLine("File at {0} exists and matches.", targetPath);
+							++successfulCopies;
+							continue;
+						} else {
+							writer.WriteLine("File at {0} exists and DOES NOT match!", targetPath);
+							allowDelete = false;
+							continue;
+						}
+					} else {
+						writer.WriteLine("File at {0} somehow disappeared???", targetPath);
+						allowDelete = false;
+						continue;
+					}
+				} catch (Exception ex) {
+					writer.WriteLine("Failed to process file to path {0}/{1}: {2}", p.VolumeId, p.Path, ex.ToString());
+					allowDelete = false;
+				}
+			}
+
+			if (successfulCopies == matchingArchive.Paths.Count) {
+				if (allowDelete) {
+					writer.WriteLine("Deleting {0}", sourcePath);
+					File.Delete(sourcePath);
+				} else {
+					writer.WriteLine("Inhibited delete of {0} despite all targets existing.", sourcePath);
+				}
+			} else {
+				writer.WriteLine("Could not copy or confirm all targets of {0}", sourcePath);
+			}
+
+			return;
+		}
+
+		private static string CreateFilePath(string deviceId, string directory, string file) {
+			string dir = directory.StartsWith("/") ? directory.Substring(1) : directory;
+			if (dir == "") {
+				return Path.Combine(deviceId, file);
+			}
+			return Path.Combine(deviceId, dir, file);
+		}
+
+		private static bool MatchPattern(string name, string pattern) {
+			// this is really hacky but it seems like this isn't anywhere in the C# default library and I don't feel like actually implementing this...
+			if (pattern.Count(x => x == '*') == 1) {
+				var ps = pattern.Split('*');
+				if (name.Length >= ps[0].Length + ps[1].Length) {
+					return name.StartsWith(ps[0]) && name.EndsWith(ps[1]);
+				}
+				return false;
+			}
+			throw new Exception("pattern matching for " + pattern + " not implemented");
+		}
 	}
 }
