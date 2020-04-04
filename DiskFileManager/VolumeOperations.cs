@@ -39,7 +39,7 @@ namespace DiskFileManager {
 					internalId = (long)rv[0][0];
 				} else {
 					internalId = (long)rv[0][0];
-					HyoutaTools.SqliteUtil.Update(t, "UPDATE Volumes SET totalSpace = ?, freeSpace = ? WHERE id = ?", new object[] { totalSpace, freeSpace, internalId });
+					HyoutaTools.SqliteUtil.Update(t, "UPDATE Volumes SET totalSpace = ?, freeSpace = ?, label = ? WHERE id = ?", new object[] { totalSpace, freeSpace, label, internalId });
 				}
 				t.Commit();
 				return new Volume() { DeviceID = id, Label = label, ID = internalId, TotalSpace = totalSpace, FreeSpace = freeSpace, ShouldScan = (bool)rv[0][1] };
