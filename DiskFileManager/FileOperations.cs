@@ -10,7 +10,7 @@ namespace DiskFileManager {
 	public static class FileOperations {
 		public static (long fileId, DateTime timestamp) InsertOrGetFile(IDbTransaction t, long filesize, byte[] hash, byte[] shorthash, DateTime lastWriteTimeUtc) {
 			var rv = HyoutaTools.SqliteUtil.SelectArray(t, "SELECT id, timestamp FROM Files WHERE size = ? AND hash = ? AND shorthash = ?", new object[] { filesize, hash, shorthash });
-			if (rv == null) {
+			if (rv == null || rv.Count == 0) {
 				long timestamp = HyoutaTools.Util.DateTimeToUnixTime(lastWriteTimeUtc);
 				HyoutaTools.SqliteUtil.Update(t, "INSERT INTO Files ( size, hash, shorthash, timestamp ) VALUES ( ?, ?, ?, ? )", new object[] { filesize, hash, shorthash, timestamp });
 				rv = HyoutaTools.SqliteUtil.SelectArray(t, "SELECT id, timestamp FROM Files WHERE size = ? AND hash = ? AND shorthash = ?", new object[] { filesize, hash, shorthash });
