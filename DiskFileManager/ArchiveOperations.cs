@@ -219,7 +219,7 @@ namespace DiskFileManager {
 							if (existedBefore) {
 								// TODO: check here if source file == target file!!!
 								// for now to be safe just inhibit delete
-								allowDelete = false;
+								//allowDelete = false;
 							}
 							writer.WriteLine("File at {0} exists and matches.", targetPath);
 							++successfulCopies;
@@ -241,11 +241,15 @@ namespace DiskFileManager {
 			}
 
 			if (successfulCopies == matchingArchive.Paths.Count) {
-				if (allowDelete) {
-					writer.WriteLine("Deleting {0}", sourcePath);
-					File.Delete(sourcePath);
+				if (matchingArchive.Paths.Count >= 2) {
+					if (allowDelete) {
+						writer.WriteLine("Deleting {0}", sourcePath);
+						File.Delete(sourcePath);
+					} else {
+						writer.WriteLine("Inhibited delete of {0} despite all targets existing.", sourcePath);
+					}
 				} else {
-					writer.WriteLine("Inhibited delete of {0} despite all targets existing.", sourcePath);
+					writer.WriteLine("Inhibited delete of {0} because only one target path is defined.", sourcePath);
 				}
 			} else {
 				writer.WriteLine("Could not copy or confirm all targets of {0}", sourcePath);
