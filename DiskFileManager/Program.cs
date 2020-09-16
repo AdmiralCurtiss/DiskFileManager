@@ -260,25 +260,48 @@ namespace DiskFileManager {
 
 
 				List<StorageFile> files = GetKnownFilesOnVolume(connection, volumeId);
-				foreach (var sameFiles in CollectFiles(connection, files, shouldPrint, volumeId)) {
-					Console.WriteLine();
-					Console.WriteLine(" ================================================================== ");
-					Console.WriteLine();
-					Console.WriteLine("File #{0}", sameFiles[0].FileId);
-					Console.WriteLine("{0:N0} bytes", sameFiles[0].Size);
-					Console.WriteLine("Exists in {0} places:", sameFiles.Count);
-					for (int i = 0; i < sameFiles.Count; ++i) {
-						var sf = sameFiles[i];
-						Console.WriteLine(" No. {0}: {1}/{2}", i, sf.Path, sf.Filename);
-					}
-
+				List<List<StorageFile>> allfiles = CollectFiles(connection, files, shouldPrint, volumeId).ToList();
+				int more = 5;
+				for (int allfilesindex = 0; allfilesindex < allfiles.Count; allfilesindex++) {
+					List<StorageFile> sameFiles = allfiles[allfilesindex];
 					while (true) {
-						Console.WriteLine("Enter number of file to keep, nothing to skip, q to quit.");
+						int prevfilesindex = allfilesindex - 1;
+						int nextfilesindex = allfilesindex + more;
+						if (prevfilesindex >= 0) {
+							PrintFileInfoForInteractiveDelete(allfiles[prevfilesindex], "     ");
+							Console.WriteLine();
+						}
+						PrintFileInfoForInteractiveDelete(sameFiles, " >>> ");
+						for (int iiii = allfilesindex + 1; iiii <= nextfilesindex; ++iiii) {
+							if (iiii < allfiles.Count) {
+								Console.WriteLine();
+								PrintFileInfoForInteractiveDelete(allfiles[iiii], "     ");
+							}
+						}
+
+						Console.WriteLine();
+						Console.WriteLine(" [file {0}/{1}, {2} to go]", allfilesindex + 1, allfiles.Count, allfiles.Count - allfilesindex);
+
+						Console.WriteLine();
+						Console.WriteLine("Enter number of file to keep, nothing to skip, q to quit, +/- to show more/less files.");
 						Console.Write(" > ");
 
 						string input = Console.ReadLine();
 						if (input == "") {
+							Console.Clear();
 							break;
+						}
+						if (input == "+") {
+							++more;
+							Console.Clear();
+							continue;
+						}
+						if (input == "-") {
+							if (more > 0) {
+								--more;
+							}
+							Console.Clear();
+							continue;
 						}
 						if (input == "q") {
 							return -2;
@@ -301,6 +324,8 @@ namespace DiskFileManager {
 									}
 									data.Add((new FileInfo(path), i != number));
 								}
+
+								Console.Clear();
 
 								bool inconsistent = false;
 								foreach (var d in data) {
@@ -329,6 +354,16 @@ namespace DiskFileManager {
 			}
 
 			return 0;
+		}
+
+		private static void PrintFileInfoForInteractiveDelete(List<StorageFile> sameFiles, string prefix) {
+			Console.WriteLine(prefix + "File #{0}", sameFiles[0].FileId);
+			Console.WriteLine(prefix + "{0:N0} bytes", sameFiles[0].Size);
+			Console.WriteLine(prefix + "Exists in {0} places:", sameFiles.Count);
+			for (int i = 0; i < sameFiles.Count; ++i) {
+				var sf = sameFiles[i];
+				Console.WriteLine(prefix + " No. {0}: {1}/{2}", i, sf.Path, sf.Filename);
+			}
 		}
 
 		private static int ListFiles(string logPath, string databasePath, int? volume, bool selectedVolumeOnly, ShouldPrint shouldPrint) {
