@@ -244,6 +244,43 @@ namespace DiskFileManager {
 			return 0;
 		}
 
+		private static string AsLetter(int i) {
+			int a = i % 26;
+			int b = i / 26;
+			if (b != 0) {
+				return AsLetter(b - 1) + AsLetter(a);
+			}
+			switch (a) {
+				case 0: return "a";
+				case 1: return "b";
+				case 2: return "c";
+				case 3: return "d";
+				case 4: return "e";
+				case 5: return "f";
+				case 6: return "g";
+				case 7: return "h";
+				case 8: return "i";
+				case 9: return "j";
+				case 10: return "k";
+				case 11: return "l";
+				case 12: return "m";
+				case 13: return "n";
+				case 14: return "o";
+				case 15: return "p";
+				case 16: return "q";
+				case 17: return "r";
+				case 18: return "s";
+				case 19: return "t";
+				case 20: return "u";
+				case 21: return "v";
+				case 22: return "w";
+				case 23: return "x";
+				case 24: return "y";
+				case 25: return "z";
+				default: throw new Exception("should never happen");
+			}
+		}
+
 		private static int RunInteractiveFileDeleteMode(string databasePath, long volumeId, ShouldPrint shouldPrint) {
 			using (SQLiteConnection connection = new SQLiteConnection("Data Source=" + databasePath)) {
 				connection.Open();
@@ -261,9 +298,22 @@ namespace DiskFileManager {
 
 				List<StorageFile> files = GetKnownFilesOnVolume(connection, volumeId);
 				List<List<StorageFile>> allfiles = CollectFiles(connection, files, shouldPrint, volumeId).ToList();
+				for (int allfilesindex = 0; allfilesindex < allfiles.Count; allfilesindex++) {
+					allfiles[allfilesindex] = allfiles[allfilesindex].OrderBy(x => (x.Path + "/" + x.Filename)).ToList();
+				}
+
 				int more = 5;
 				for (int allfilesindex = 0; allfilesindex < allfiles.Count; allfilesindex++) {
 					List<StorageFile> sameFiles = allfiles[allfilesindex];
+					List<string> existingFilenames = new List<string>();
+					foreach (StorageFile ssf in sameFiles) {
+						if (!existingFilenames.Contains(ssf.Filename)) {
+							existingFilenames.Add(ssf.Filename);
+						}
+					}
+					existingFilenames.Sort();
+
+					int? selectedFilename = null;
 					while (true) {
 						int prevfilesindex = allfilesindex - 1;
 						int nextfilesindex = allfilesindex + more;
@@ -272,6 +322,14 @@ namespace DiskFileManager {
 							Console.WriteLine();
 						}
 						PrintFileInfoForInteractiveDelete(sameFiles, " >>> ");
+
+						if (existingFilenames.Count > 1) {
+							Console.WriteLine(" >>> Available filenames:");
+							for (int i = 0; i < existingFilenames.Count; ++i) {
+								Console.WriteLine(" >>> {2}Filename {0}: {1}", AsLetter(i), existingFilenames[i], selectedFilename == i ? "!" : " ");
+							}
+						}
+
 						for (int iiii = allfilesindex + 1; iiii <= nextfilesindex; ++iiii) {
 							if (iiii < allfiles.Count) {
 								Console.WriteLine();
@@ -283,7 +341,7 @@ namespace DiskFileManager {
 						Console.WriteLine(" [file {0}/{1}, {2} to go]", allfilesindex + 1, allfiles.Count, allfiles.Count - allfilesindex);
 
 						Console.WriteLine();
-						Console.WriteLine("Enter number of file to keep, nothing to skip, q to quit, +/- to show more/less files.");
+						Console.WriteLine("Enter number of file to keep, lowercase letter for target filename, nothing to skip, Q to quit, +/- to show more/less files.");
 						Console.Write(" > ");
 
 						string input = Console.ReadLine();
@@ -303,7 +361,7 @@ namespace DiskFileManager {
 							Console.Clear();
 							continue;
 						}
-						if (input == "q") {
+						if (input == "Q") {
 							return -2;
 						}
 
@@ -340,10 +398,27 @@ namespace DiskFileManager {
 											Console.WriteLine("Deleting {0}", d.fi.FullName);
 											d.fi.Delete();
 										} else {
-											Console.WriteLine("Keeping {0}", d.fi.FullName);
+											if (selectedFilename.HasValue) {
+												string newpath = Path.Combine(Path.GetDirectoryName(d.fi.FullName), existingFilenames[selectedFilename.Value]);
+												if (File.Exists(newpath)) {
+													Console.WriteLine("Keeping {0}; renaming to {1} not possible, skipping it", d.fi.FullName, newpath);
+												} else {
+													Console.WriteLine("Renaming {0} to {1}", d.fi.FullName, newpath);
+													File.Move(d.fi.FullName, newpath);
+												}
+											} else {
+												Console.WriteLine("Keeping {0}", d.fi.FullName);
+											}
 										}
 									}
 								}
+								break;
+							}
+						}
+
+						for (int i = 0; i < existingFilenames.Count; ++i) {
+							if (AsLetter(i) == input) {
+								selectedFilename = i;
 								break;
 							}
 						}
