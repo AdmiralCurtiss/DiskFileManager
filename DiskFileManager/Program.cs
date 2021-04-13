@@ -437,7 +437,11 @@ namespace DiskFileManager {
 
 		private static void PrintFileInfoForInteractiveDelete(List<StorageFile> sameFiles, string prefix) {
 			Console.WriteLine(prefix + "File #{0}", sameFiles[0].FileId);
-			Console.WriteLine(prefix + "{0:N0} bytes", sameFiles[0].Size);
+			Console.Write(prefix + "{0:N0} bytes / SHA256: ", sameFiles[0].Size);
+			foreach (byte b in sameFiles[0].Hash) {
+				Console.Write("{0:x2}", b);
+			}
+			Console.WriteLine();
 			Console.WriteLine(prefix + "Exists in {0} places:", sameFiles.Count);
 			for (int i = 0; i < sameFiles.Count; ++i) {
 				var sf = sameFiles[i];
@@ -485,7 +489,11 @@ namespace DiskFileManager {
 		private static void PrintSameFileInformation(TextWriter stdout, List<StorageFile> sameFiles, List<Volume> volumes) {
 			if (sameFiles.Count > 0) {
 				stdout.WriteLine("File #{0}", sameFiles[0].FileId);
-				stdout.WriteLine("{0:N0} bytes", sameFiles[0].Size);
+				stdout.Write("{0:N0} bytes / SHA256: ", sameFiles[0].Size);
+				foreach (byte b in sameFiles[0].Hash) {
+					stdout.Write("{0:x2}", b);
+				}
+				stdout.WriteLine();
 				stdout.WriteLine("Exists in {0} places:", sameFiles.Count);
 				foreach (var sf in sameFiles) {
 					Volume vol = volumes.Where(x => x.ID == sf.VolumeId).FirstOrDefault();
