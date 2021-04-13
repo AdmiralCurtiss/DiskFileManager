@@ -26,6 +26,8 @@ namespace DiskFileManager {
 
 	[Verb("scan", HelpText = "Scan currently attached volumes for new, removed, or changed files.")]
 	public class ScanOptions : BaseOptions {
+		[Option('v', "volume", Default = null, Required = false, HelpText = "Limit scan to given volume ID.")]
+		public int? Volume { get; set; }
 	}
 
 	[Verb("list", HelpText = "List volumes or files.")]
@@ -146,7 +148,9 @@ namespace DiskFileManager {
 
 				var volumes = VolumeOperations.FindAndInsertAttachedVolumes(connection);
 				foreach (Volume v in volumes) {
-					ProcessVolume(textWriterWrapper.Writer, connection, v);
+					if (!args.Volume.HasValue || (args.Volume.Value == v.ID)) {
+						ProcessVolume(textWriterWrapper.Writer, connection, v);
+					}
 				}
 
 				connection.Close();
