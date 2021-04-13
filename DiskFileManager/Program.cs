@@ -482,7 +482,8 @@ namespace DiskFileManager {
 
 		private static void PrintVolumeInformation(TextWriter stdout, IEnumerable<Volume> volumes) {
 			foreach (var volume in volumes.OrderBy(x => x.Label)) {
-				stdout.WriteLine("Volume #{0,3}: {1,-40} [{2,19:N0} free / {3,19:N0} total]", volume.ID, volume.Label, volume.FreeSpace, volume.TotalSpace);
+				string lastScan = volume.LastScan.ToString("u");
+				stdout.WriteLine("Volume #{0,3}: {1,-40} [{2,19:N0} free / {3,19:N0} total] (last scan: {4}) {5}", volume.ID, volume.Label, volume.FreeSpace, volume.TotalSpace, lastScan, volume.Dirty != 0 ? "(dirty)" : "");
 			}
 		}
 
@@ -633,9 +634,21 @@ namespace DiskFileManager {
 				return null;
 			}
 
+			using (IDbTransaction t = connection.BeginTransaction()) {
+				HyoutaTools.SqliteUtil.Update(t, "UPDATE Volumes SET dirty = 1 WHERE id = ?", new object[] { volume.ID });
+				t.Commit();
+			}
+
 			List<StorageFile> files = new List<StorageFile>();
 			ProcessDirectory(stdout, connection, files, volume, new DirectoryInfo(volume.DeviceID), "");
 			DiscardUnseenStorageFiles(stdout, connection, files, volume);
+
+			using (IDbTransaction t = connection.BeginTransaction()) {
+				long lastScan = HyoutaTools.Util.DateTimeToUnixTime(DateTime.UtcNow);
+				HyoutaTools.SqliteUtil.Update(t, "UPDATE Volumes SET dirty = 0, lastScan = ? WHERE id = ?", new object[] { lastScan, volume.ID });
+				t.Commit();
+			}
+
 			return files;
 		}
 

@@ -12,5 +12,7 @@ namespace DiskFileManager {
 		public long TotalSpace;
 		public long FreeSpace;
 		public bool ShouldScan;
+		public DateTime LastScan;
+		public long Dirty;
 	}
 }
