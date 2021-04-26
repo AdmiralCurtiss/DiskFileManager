@@ -35,6 +35,9 @@ namespace DiskFileManager {
 		[Option('v', "volume", Default = null, Required = false, HelpText = "Volume ID to list files of. 0 to list all volumes.")]
 		public int? Volume { get; set; }
 
+		[Option("show-disabled", Default = false, Required = false, HelpText = "Also show disabled volumes.")]
+		public bool ShowDisabledVolumes { get; set; }
+
 		[Option("selected-volume-only", Default = false, Required = false, HelpText = "Only list files on the given volume.")]
 		public bool SelectedVolumeOnly { get; set; }
 
@@ -233,15 +236,15 @@ namespace DiskFileManager {
 					return minLimit && maxLimit;
 				});
 			} else {
-				return ListVolumes(args.LogPath, args.DatabasePath);
+				return ListVolumes(args.LogPath, args.DatabasePath, args.ShowDisabledVolumes);
 			}
 		}
 
-		private static int ListVolumes(string logPath, string databasePath) {
+		private static int ListVolumes(string logPath, string databasePath, bool showDisabledVolumes) {
 			using (TextWriterWrapper textWriterWrapper = new TextWriterWrapper(logPath))
 			using (SQLiteConnection connection = new SQLiteConnection("Data Source=" + databasePath)) {
 				connection.Open();
-				PrintVolumeInformation(textWriterWrapper.Writer, VolumeOperations.GetKnownVolumes(connection).Where(x => x.ShouldScan));
+				PrintVolumeInformation(textWriterWrapper.Writer, VolumeOperations.GetKnownVolumes(connection).Where(x => showDisabledVolumes || x.ShouldScan));
 				connection.Close();
 			}
 
@@ -483,7 +486,16 @@ namespace DiskFileManager {
 		private static void PrintVolumeInformation(TextWriter stdout, IEnumerable<Volume> volumes) {
 			foreach (var volume in volumes.OrderBy(x => x.Label)) {
 				string lastScan = volume.LastScan.ToString("u");
-				stdout.WriteLine("Volume #{0,3}: {1,-40} [{2,19:N0} free / {3,19:N0} total] (last scan: {4}) {5}", volume.ID, volume.Label, volume.FreeSpace, volume.TotalSpace, lastScan, volume.Dirty != 0 ? "(dirty)" : "");
+				stdout.WriteLine(
+					"{6}Volume #{0,3}: {1,-40} [{2,19:N0} free / {3,19:N0} total] (last scan: {4}) {5}",
+					volume.ID,
+					volume.Label,
+					volume.FreeSpace,
+					volume.TotalSpace,
+					lastScan,
+					volume.Dirty != 0 ? "(dirty)" : "",
+					volume.ShouldScan ? "  " : "D "
+				);
 			}
 		}
 
