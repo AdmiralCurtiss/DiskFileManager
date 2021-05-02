@@ -162,7 +162,7 @@ namespace DiskFileManager {
 					t.Commit();
 				}
 
-				var volumes = VolumeOperations.FindAndInsertAttachedVolumes(connection);
+				var volumes = VolumeOperations.FindAndInsertAttachedVolumes(connection, args.Volume);
 				foreach (Volume v in volumes) {
 					if (!args.Volume.HasValue || (args.Volume.Value == v.ID)) {
 						ProcessVolume(textWriterWrapper.Writer, connection, v);

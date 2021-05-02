@@ -31,7 +31,7 @@ namespace DiskFileManager {
 			return volumes;
 		}
 
-		public static Volume CreateOrFindVolume(SQLiteConnection connection, string id, string label, long totalSpace, long freeSpace) {
+		public static Volume CreateOrFindVolume(SQLiteConnection connection, string id, string label, long totalSpace, long freeSpace, int? onlyVolumeId) {
 			using (IDbTransaction t = connection.BeginTransaction()) {
 				List<object[]> rv = HyoutaTools.SqliteUtil.SelectArray(t, "SELECT id, shouldScan, lastScan, dirty FROM Volumes WHERE guid = ?", new object[] { id });
 				long internalId;
@@ -39,6 +39,9 @@ namespace DiskFileManager {
 				DateTime lastScan;
 				long dirty;
 				if (rv == null || rv.Count == 0) {
+					if (onlyVolumeId.HasValue) {
+						return null;
+					}
 					HyoutaTools.SqliteUtil.Update(t, "INSERT INTO Volumes ( guid, label, totalSpace, freeSpace, shouldScan ) VALUES ( ?, ?, ?, ?, ? )", new object[] { id, label, totalSpace, freeSpace, true });
 					rv = HyoutaTools.SqliteUtil.SelectArray(t, "SELECT id, shouldScan FROM Volumes WHERE guid = ?", new object[] { id });
 					internalId = (long)rv[0][0];
@@ -47,6 +50,9 @@ namespace DiskFileManager {
 					dirty = 1;
 				} else {
 					internalId = (long)rv[0][0];
+					if (onlyVolumeId.HasValue && onlyVolumeId.Value != internalId) {
+						return null;
+					}
 					shouldScan = (bool)rv[0][1];
 					lastScan = HyoutaTools.Util.UnixTimeToDateTime((long)rv[0][2]);
 					dirty = (long)rv[0][3];
@@ -57,10 +63,13 @@ namespace DiskFileManager {
 			}
 		}
 
-		public static List<Volume> FindAndInsertAttachedVolumes(SQLiteConnection connection) {
+		public static List<Volume> FindAndInsertAttachedVolumes(SQLiteConnection connection, int? onlyVolumeId = null) {
 			List<Volume> volumes = new List<Volume>();
 			foreach (Win32Volume vol in Win32Util.GetAttachedVolumes()) {
-				volumes.Add(CreateOrFindVolume(connection, vol.Id, vol.Label, (long)vol.Capacity, (long)vol.FreeSpace));
+				Volume v = CreateOrFindVolume(connection, vol.Id, vol.Label, (long)vol.Capacity, (long)vol.FreeSpace, onlyVolumeId);
+				if (v != null) {
+					volumes.Add(v);
+				}
 			}
 			return volumes;
 		}
