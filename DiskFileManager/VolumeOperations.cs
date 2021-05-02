@@ -64,5 +64,12 @@ namespace DiskFileManager {
 			}
 			return volumes;
 		}
+
+		public static void SetVolumeEnabledState(SQLiteConnection connection, int volumeId, bool enableVolume) {
+			using (IDbTransaction t = connection.BeginTransaction()) {
+				HyoutaTools.SqliteUtil.Update(t, "UPDATE Volumes SET shouldScan = ? WHERE id = ?", new object[] { enableVolume ? 1 : 0, volumeId });
+				t.Commit();
+			}
+		}
 	}
 }

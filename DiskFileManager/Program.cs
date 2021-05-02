@@ -96,6 +96,18 @@ namespace DiskFileManager {
 		public string ScanPath { get; set; }
 	}
 
+	[Verb("volume-maintenance", HelpText = "Do volume maintenance.")]
+	public class VolumeMaintenanceOptions : BaseOptions {
+		[Option('v', "volume", Default = null, Required = true, HelpText = "Volume ID to list files of. 0 to list all volumes.")]
+		public int? Volume { get; set; }
+
+		[Option("enable", Default = null, Required = false, HelpText = "Enable selected volume.")]
+		public bool EnableVolume { get; set; }
+
+		[Option("disable", Default = null, Required = false, HelpText = "Disable selected volume.")]
+		public bool DisableVolume { get; set; }
+	}
+
 	class TextWriterWrapper : IDisposable {
 		public TextWriter Writer { get; private set; }
 
@@ -116,13 +128,14 @@ namespace DiskFileManager {
 
 	class Program {
 		static int Main(string[] args) {
-			return Parser.Default.ParseArguments<ScanOptions, ListOptions, SearchOptions, QuickfindMultipleOptions, QuickfindExclusiveOptions, ArchiveOptions>(args).MapResult(
+			return Parser.Default.ParseArguments<ScanOptions, ListOptions, SearchOptions, QuickfindMultipleOptions, QuickfindExclusiveOptions, ArchiveOptions, VolumeMaintenanceOptions>(args).MapResult(
 				(ScanOptions a) => Scan(a),
 				(ListOptions a) => List(a),
 				(SearchOptions a) => Search(a),
 				(QuickfindMultipleOptions a) => QuickfindMultipleCopiesOnSameVolume(a),
 				(QuickfindExclusiveOptions a) => QuickfindFilesExclusiveToVolume(a),
 				(ArchiveOptions a) => Archive(a),
+				(VolumeMaintenanceOptions a) => VolumeMaintenance(a),
 				errs => -1
 			);
 		}
@@ -154,6 +167,21 @@ namespace DiskFileManager {
 					if (!args.Volume.HasValue || (args.Volume.Value == v.ID)) {
 						ProcessVolume(textWriterWrapper.Writer, connection, v);
 					}
+				}
+
+				connection.Close();
+			}
+
+			return 0;
+		}
+
+		private static int VolumeMaintenance(VolumeMaintenanceOptions args) {
+			using (TextWriterWrapper textWriterWrapper = new TextWriterWrapper(args.LogPath))
+			using (SQLiteConnection connection = new SQLiteConnection("Data Source=" + args.DatabasePath)) {
+				connection.Open();
+
+				if ((args.EnableVolume || args.DisableVolume) && !(args.EnableVolume && args.DisableVolume)) {
+					VolumeOperations.SetVolumeEnabledState(connection, args.Volume.Value, args.EnableVolume);
 				}
 
 				connection.Close();
