@@ -106,6 +106,9 @@ namespace DiskFileManager {
 
 		[Option("disable", Default = null, Required = false, HelpText = "Disable selected volume.")]
 		public bool DisableVolume { get; set; }
+
+		[Option("purge-data", Default = null, Required = false, HelpText = "Discard file information of selected volume.")]
+		public bool PurgeData { get; set; }
 	}
 
 	class TextWriterWrapper : IDisposable {
@@ -182,6 +185,16 @@ namespace DiskFileManager {
 
 				if ((args.EnableVolume || args.DisableVolume) && !(args.EnableVolume && args.DisableVolume)) {
 					VolumeOperations.SetVolumeEnabledState(connection, args.Volume.Value, args.EnableVolume);
+				}
+
+				if (args.PurgeData) {
+					// to do this we start a fake scan that isn't actually allowed to see/touch any file
+					var volumes = VolumeOperations.GetKnownVolumes(connection);
+					foreach (Volume v in volumes) {
+						if (args.Volume.Value == v.ID) {
+							ProcessVolume(textWriterWrapper.Writer, connection, v, fakeScan: true);
+						}
+					}
 				}
 
 				connection.Close();
@@ -669,8 +682,8 @@ namespace DiskFileManager {
 			return files;
 		}
 
-		private static List<StorageFile> ProcessVolume(TextWriter stdout, SQLiteConnection connection, Volume volume) {
-			if (!volume.ShouldScan) {
+		private static List<StorageFile> ProcessVolume(TextWriter stdout, SQLiteConnection connection, Volume volume, bool fakeScan = false) {
+			if (!fakeScan && !volume.ShouldScan) {
 				return null;
 			}
 
@@ -680,7 +693,9 @@ namespace DiskFileManager {
 			}
 
 			List<StorageFile> files = new List<StorageFile>();
-			ProcessDirectory(stdout, connection, files, volume, new DirectoryInfo(volume.DeviceID), "");
+			if (!fakeScan) {
+				ProcessDirectory(stdout, connection, files, volume, new DirectoryInfo(volume.DeviceID), "");
+			}
 			DiscardUnseenStorageFiles(stdout, connection, files, volume);
 
 			using (IDbTransaction t = connection.BeginTransaction()) {
