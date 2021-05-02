@@ -50,7 +50,7 @@ namespace DiskFileManager {
 					shouldScan = (bool)rv[0][1];
 					lastScan = HyoutaTools.Util.UnixTimeToDateTime((long)rv[0][2]);
 					dirty = (long)rv[0][3];
-					HyoutaTools.SqliteUtil.Update(t, "UPDATE Volumes SET totalSpace = ?, freeSpace = ?, label = ? WHERE id = ?", new object[] { totalSpace, freeSpace, label, internalId });
+					HyoutaTools.SqliteUtil.Update(t, "UPDATE Volumes SET totalSpace = ?, freeSpace = ?, label = ?, dirty = 1 WHERE id = ?", new object[] { totalSpace, freeSpace, label, internalId });
 				}
 				t.Commit();
 				return new Volume() { DeviceID = id, Label = label, ID = internalId, TotalSpace = totalSpace, FreeSpace = freeSpace, ShouldScan = shouldScan, LastScan = lastScan, Dirty = dirty };
