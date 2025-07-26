@@ -52,6 +52,12 @@ namespace DiskFileManager {
 	public class SearchOptions : BaseOptions {
 		[Option('f', "filename", Default = null, Required = true, HelpText = "Search pattern for filename.")]
 		public string File { get; set; }
+
+		[Option("min-instance-count", Default = null, Required = false, HelpText = "Minimum file instance count.")]
+		public int? MinInstanceCount { get; set; }
+
+		[Option("max-instance-count", Default = null, Required = false, HelpText = "Maximum file instance count.")]
+		public int? MaxInstanceCount { get; set; }
 	}
 
 	[Verb("multi", HelpText = "Find files that exist in multiple places on the same volume.")]
@@ -515,7 +521,11 @@ namespace DiskFileManager {
 			using (SQLiteConnection connection = new SQLiteConnection("Data Source=" + args.DatabasePath)) {
 				connection.Open();
 				List<Volume> volumes = VolumeOperations.GetKnownVolumes(connection);
-				foreach (var sameFiles in CollectFiles(connection, GetFilesWithFilename(connection, "%" + args.File + "%"), (x) => true)) {
+				foreach (var sameFiles in CollectFiles(connection, GetFilesWithFilename(connection, "%" + args.File + "%"), (x) => {
+					bool minLimit = args.MinInstanceCount == null || x.Count >= args.MinInstanceCount.Value;
+					bool maxLimit = args.MaxInstanceCount == null || x.Count <= args.MaxInstanceCount.Value;
+					return minLimit && maxLimit;
+				})) {
 					PrintSameFileInformation(textWriterWrapper.Writer, sameFiles, volumes);
 				}
 				connection.Close();
