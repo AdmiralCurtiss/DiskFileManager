@@ -353,8 +353,9 @@ namespace DiskFileManager {
 				List<StorageFile> files = GetKnownFilesOnVolume(connection, volumeId);
 				List<List<StorageFile>> allfiles = CollectFiles(connection, files, shouldPrint, volumeId).ToList();
 				for (int allfilesindex = 0; allfilesindex < allfiles.Count; allfilesindex++) {
-					allfiles[allfilesindex] = allfiles[allfilesindex].OrderBy(x => (x.Path + "/" + x.Filename)).ToList();
+					allfiles[allfilesindex] = allfiles[allfilesindex].OrderBy(x => Path.GetFileNameWithoutExtension(x.Filename)).ToList();
 				}
+				allfiles = allfiles.OrderBy(x => x.First().Filename).ToList();
 
 				int more = 5;
 				for (int allfilesindex = 0; allfilesindex < allfiles.Count; allfilesindex++) {
@@ -398,7 +399,10 @@ namespace DiskFileManager {
 						Console.WriteLine("Enter number of file to keep, lowercase letter for target filename, nothing to skip, Q to quit, +/- to show more/less files.");
 						Console.Write(" > ");
 
-						string input = Console.ReadLine();
+						string input = "";
+						if (input == "") {
+							input = Console.ReadLine();
+						}
 						if (input == "") {
 							Console.Clear();
 							break;
@@ -495,7 +499,8 @@ namespace DiskFileManager {
 			Console.WriteLine(prefix + "Exists in {0} places:", sameFiles.Count);
 			for (int i = 0; i < sameFiles.Count; ++i) {
 				var sf = sameFiles[i];
-				Console.WriteLine(prefix + " No. {0}: {1}/{2}", i, sf.Path, sf.Filename);
+				Console.WriteLine(prefix + " No. {0}: {1}/", i, sf.Path);
+				Console.WriteLine(prefix + "          {0}", sf.Filename);
 			}
 		}
 
